@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dsh-red-blue-team"
+version = "0.1.0"
+description = "基于 dsh-python 智能体框架的红队/蓝队安全检测系统：自动攻击、漏洞判定、自动修复、回归验证、wanter 自适应攻击优先级（内置 dsh 框架副本，自包含）"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["security", "red-team", "blue-team", "llm-security", "agent", "pentest", "dsh"]
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "httpx>=0.27",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[project.scripts]
+dsh-python = "dsh.cli.main:main"
+dsh-redteam = "redteam.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["dsh*", "redteam*", "target_lab*", "sample_bank*"]
+
+[tool.setuptools.package-data]
+"dsh.config.bundles" = ["*.yml"]
+"dsh.server.static" = ["*.html", "*.css", "*.js"]
+"sample_bank" = ["*.yaml"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests", "tests_redteam"]

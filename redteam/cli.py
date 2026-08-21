@@ -1,0 +1,558 @@
+"""redteam.cli —— dsh-redteam 命令行入口。
+
+子命令:
+    scan     --config scan.yml                对目标发起红队扫描并出报告
+    fix      --config scan.yml --scan ID      蓝队：按报告生成并应用修复+回归
+    lab      [--port 8765] [--guards FILE]    启动内置靶场
+    report   [--scan ID] [--list]             查看/重新生成报告
+    bench    --config scan.yml                自适应优先级基准（二次扫描命中率提升）
+    demo     [--out DIR]                      一键演示：靶场+扫描+修复+回归闭环
+    samples  [list|show CATEGORY]             查看攻击样本库
+"""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import logging
+import os
+import sys
+import tempfile
+from typing import Any, Dict, List, Optional
+
+from . import __version__
+from .config import ScanConfig
+from .errors import AuthorizationError, RedTeamError
+from .models import Severity, Verdict
+
+
+def _setup_console() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except (ValueError, OSError):
+                pass
+    logging.basicConfig(level=logging.INFO,
+                        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+                        datefmt="%H:%M:%S")
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="dsh-redteam",
+        description="红队/蓝队智能安全检测系统（基于 dsh-python 框架）。"
+                    "合规红线：仅限授权测试。")
+    parser.add_argument("--version", action="version",
+                        version=f"dsh-redteam {__version__}")
+    sub = parser.add_subparsers(dest="command")
+
+    scan = sub.add_parser("scan", help="红队扫描（网址动态 / 文件夹静态）")
+    scan.add_argument("--config", required=True, help="扫描配置 scan.yml")
+    scan.add_argument("--out", default=None, help="报告输出目录")
+    scan.add_argument("--fix", action="store_true",
+                      help="扫描后自动执行蓝队修复+回归（仅 lab 目标自动应用）")
+    scan.add_argument("--mode", default=None, help="扫描模式标签（默认取 profile）")
+
+    static = sub.add_parser("static", help="本地文件夹快速静态扫描（免配置）")
+    static.add_argument("folder", help="项目文件夹路径")
+    static.add_argument("--out", default="./reports", help="报告输出目录")
+    static.add_argument("--scenario", default="auto",
+                        help="业务场景（auto/显式指定，如 ecommerce）")
+
+    fix = sub.add_parser("fix", help="蓝队修复（生成方案/沙箱应用/回归/修复报告）")
+    fix.add_argument("--config", required=True, help="扫描配置 scan.yml")
+    fix.add_argument("--scan", required=True, help="扫描编号（dsh-redteam report --list）")
+    fix.add_argument("--dry-run", action="store_true", help="只生成修复方案，不应用")
+
+    lab = sub.add_parser("lab", help="启动内置靶场")
+    lab.add_argument("--port", type=int, default=8765)
+    lab.add_argument("--guards", default=None, help="防护配置文件（默认自动生成）")
+
+    report = sub.add_parser("report", help="查看报告")
+    report.add_argument("--config", default=None, help="扫描配置（重建报告需要）")
+    report.add_argument("--scan", default=None, help="扫描编号")
+    report.add_argument("--list", action="store_true", help="列出历史扫描")
+    report.add_argument("--json", action="store_true", help="输出 JSON 报告")
+
+    bench = sub.add_parser("bench", help="自适应优先级基准（二次扫描命中率提升）")
+    bench.add_argument("--config", required=True, help="扫描配置 scan.yml")
+
+    demo = sub.add_parser("demo", help="一键演示完整闭环（含多业务场景）")
+    demo.add_argument("--out", default="./demo_out", help="产物目录")
+    demo.add_argument("--port", type=int, default=0, help="靶场端口（0=随机）")
+
+    samples = sub.add_parser("samples", help="查看攻击样本库")
+    samples.add_argument("action", nargs="?", default="list",
+                         choices=["list", "show"])
+    samples.add_argument("category", nargs="?", default=None)
+
+    scenarios = sub.add_parser("scenarios", help="查看业务场景库（12 大场景指纹与样本）")
+    scenarios.add_argument("action", nargs="?", default="list",
+                           choices=["list", "show"])
+    scenarios.add_argument("scenario", nargs="?", default=None)
+    return parser
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    _setup_console()
+    args = build_parser().parse_args(argv)
+    try:
+        if args.command == "scan":
+            asyncio.run(cmd_scan(args))
+        elif args.command == "static":
+            asyncio.run(cmd_static(args))
+        elif args.command == "fix":
+            asyncio.run(cmd_fix(args))
+        elif args.command == "lab":
+            cmd_lab(args)
+        elif args.command == "report":
+            asyncio.run(cmd_report(args))
+        elif args.command == "bench":
+            asyncio.run(cmd_bench(args))
+        elif args.command == "demo":
+            asyncio.run(cmd_demo(args))
+        elif args.command == "samples":
+            cmd_samples(args)
+        elif args.command == "scenarios":
+            cmd_scenarios(args)
+        else:
+            build_parser().print_help()
+            return 1
+        return 0
+    except AuthorizationError as exc:
+        print(f"\n[合规拦截] {exc}\n", file=sys.stderr)
+        return 2
+    except RedTeamError as exc:
+        print(f"\n[错误] {exc}\n", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print("\n[已中断]", file=sys.stderr)
+        return 130
+
+
+# ---------- 实现 ----------
+
+async def _load_scan_result(runtime, storage, scan_id: str):
+    """从存储重建扫描结果（报告/修复命令用）。"""
+    from .models import ScanResult
+    from .detector.verdict import VerdictResult  # noqa: F401 (类型提示)
+    row = storage.get_scan(scan_id)
+    if row is None:
+        raise RedTeamError(f"扫描不存在: {scan_id}")
+    result = ScanResult(scan_id=scan_id, target=row["target"],
+                        started_at=row["started_at"],
+                        finished_at=row["finished_at"],
+                        status=row["status"])
+    for attack in storage.attacks_for_scan(scan_id):
+        result.verdicts.append(_verdict_from_row(attack))
+    for finding in storage.findings_for_scan(scan_id):
+        from .models import Finding
+        result.findings.append(Finding(
+            finding_id=finding["finding_id"], scan_id=finding["scan_id"],
+            category=finding["category"], owasp=finding["owasp"],
+            severity=finding["severity"], sample_id=finding["sample_id"],
+            sample_uid=finding["sample_uid"], payload=finding["payload"],
+            role=finding["role"], chain=json.loads(finding["chain"] or "[]"),
+            evidence=finding["evidence"],
+            signals=json.loads(finding["signals"] or "{}"),
+            confidence=finding["confidence"],
+            fix={"auto_fixable": bool(finding["fix_template"]),
+                 "template": finding["fix_template"],
+                 "plan": finding["fix_plan"],
+                 "status": finding["fix_status"]}))
+    result.report_path = row["report_path"] or ""
+    result.audit_path = row["audit_path"] or ""
+    result.probe = json.loads(row["probe"] or "{}")
+    return result
+
+
+def _verdict_from_row(row: Dict[str, Any]):
+    from .models import VerdictResult
+    return VerdictResult(
+        sample_uid=row["sample_uid"], category=row["category"],
+        role=row["role"], verdict=row["verdict"],
+        confidence=row["confidence"], evidence=row["evidence"] or "",
+        chain=json.loads(row["chain"] or "[]"), created_at=row["created_at"])
+
+
+def _print_scan_summary(result) -> None:
+    counts = result.severity_counts()
+    print(f"\n扫描完成：{result.scan_id}（{result.target}）")
+    print(f"  样本 {result.total} ｜ 攻击成功 {result.success_count} ｜ "
+          f"存疑 {result.suspicious_count}")
+    print("  漏洞分布：", "  ".join(
+        f"{s.value}={counts[s.value]}" for s in Severity if counts[s.value]))
+    if result.report_path:
+        print(f"  报告：{result.report_path}")
+        print(f"  JSON：{result.report_json_path}")
+    if result.audit_path:
+        print(f"  审计：{result.audit_path}")
+
+
+async def cmd_scan(args: argparse.Namespace) -> None:
+    cfg = ScanConfig.from_yaml(args.config)
+    if args.out:
+        cfg.out_dir = args.out
+    from .runtime import RedTeamRuntime
+    from .engine import ScanRunner, build_adapter
+    runtime = RedTeamRuntime(cfg)
+    await runtime.start()
+    adapter = None
+    try:
+        adapter = build_adapter(cfg)   # folder 目标返回 None（静态扫描）
+        runner = ScanRunner(runtime, cfg, adapter,
+                            scan_mode=args.mode or cfg.profile)
+        result = await runner.run()
+        _print_scan_summary(result)
+        if (args.fix or cfg.blueteam.enabled) and adapter is not None \
+                and cfg.target.type != "folder":
+            print("\n--- 蓝队修复 ---")
+            await _run_blue(runtime, cfg, adapter, result, apply=args.fix
+                            or cfg.blueteam.enabled)
+        elif args.fix and cfg.target.type == "folder":
+            print("\n（文件夹静态扫描的修复为人工实施指引，见报告修复工单）")
+    finally:
+        if adapter is not None:
+            await adapter.close()
+        await runtime.close()
+
+
+async def cmd_static(args: argparse.Namespace) -> None:
+    """免配置快速静态扫描：dsh-redteam static <文件夹>"""
+    folder = os.path.abspath(args.folder)
+    cfg = ScanConfig.from_dict({
+        "profile": "quick",
+        "target": {"name": os.path.basename(folder), "type": "folder",
+                   "folder_path": folder, "scenario": args.scenario},
+        "storage": {"db_path": os.path.join(args.out, "static.db"),
+                    "audit_dir": os.path.join(args.out, "audit")},
+        "out_dir": args.out,
+    })
+    from .runtime import RedTeamRuntime
+    from .engine import ScanRunner
+    runtime = RedTeamRuntime(cfg)
+    await runtime.start()
+    try:
+        result = await ScanRunner(runtime, cfg, None, scan_mode="static").run()
+        _print_scan_summary(result)
+    finally:
+        await runtime.close()
+
+
+async def _run_blue(runtime, cfg, adapter, result, apply: bool = True) -> None:
+    from .blueteam import BlueEngine
+    blue = BlueEngine(runtime, cfg, adapter, result)
+    outcome = await blue.run(apply_fixes=apply)
+    summary = outcome.summary()
+    print(f"  修复方案 {summary['plans']} 条 ｜ 应用 {summary['applied']} 条 ｜ "
+          f"回归通过 {summary['verified']} 条 ｜ 回滚 {len(outcome.rolled_back)} 条")
+    if outcome.regressions:
+        for regression in outcome.regressions:
+            mark = "✓" if regression.passed else "✗"
+            print(f"  [{mark}] {regression.finding_id}: {regression.detail}")
+    if outcome.remediation_path:
+        print(f"  修复报告: {outcome.remediation_path}")
+    if apply and summary["passed_all"] and outcome.regressions:
+        print("\n  🎉 回归清零：全部漏洞修复有效，同一攻击重跑 0 命中。")
+    elif apply and outcome.regressions:
+        print("\n  ⚠️ 存在回归未清零的漏洞（已按配置回滚），请人工复核。")
+
+
+async def cmd_fix(args: argparse.Namespace) -> None:
+    cfg = ScanConfig.from_yaml(args.config)
+    from .runtime import RedTeamRuntime
+    from .engine import build_adapter
+    runtime = RedTeamRuntime(cfg)
+    await runtime.start()
+    adapter = None
+    try:
+        adapter = build_adapter(cfg)
+        result = await _load_scan_result(runtime, runtime.storage, args.scan)
+        print(f"蓝队修复：扫描 {args.scan}（{len(result.findings)} 条漏洞）")
+        if adapter is None:
+            print("（静态/文件夹扫描：输出人工实施修复报告）")
+            from .blueteam import BlueEngine
+            outcome = await BlueEngine(runtime, cfg, adapter, result).run(
+                apply_fixes=False)
+            print(f"  修复方案 {len(outcome.plans)} 条 ｜ "
+                  f"修复报告: {outcome.remediation_path}")
+            return
+        await _run_blue(runtime, cfg, adapter, result, apply=not args.dry_run)
+    finally:
+        if adapter is not None:
+            await adapter.close()
+        await runtime.close()
+
+
+def cmd_lab(args: argparse.Namespace) -> None:
+    from target_lab import build_default_guards_file, start_lab
+    guards = args.guards or os.path.join(os.getcwd(), "lab_guards.yml")
+    if not os.path.exists(guards):
+        build_default_guards_file(guards)
+        print(f"已生成默认弱防护配置（全部漏洞开启）: {guards}")
+    lab = start_lab(guards_file=guards, port=args.port)
+    print(f"靶场已启动: {lab.base_url}")
+    print(f"  防护配置: {guards}（蓝队修复会修改此文件）")
+    print(f"  管理令牌: lab-admin-token（/_admin/reload /_admin/reset）")
+    print("  Ctrl+C 停止")
+    try:
+        import time
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:
+        lab.stop()
+        print("\n靶场已停止。")
+
+
+async def cmd_report(args: argparse.Namespace) -> None:
+    if args.config is None:
+        args.config = os.path.join(os.getcwd(), "scan.yml")
+    if not os.path.exists(args.config):
+        raise RedTeamError(f"缺少配置文件: {args.config}（--config 指定）")
+    cfg = ScanConfig.from_yaml(args.config)
+    from .runtime import RedTeamRuntime
+    runtime = RedTeamRuntime(cfg)
+    await runtime.start()
+    try:
+        if args.list or not args.scan:
+            rows = runtime.storage.list_scans()
+            if not rows:
+                print("(暂无历史扫描)")
+                return
+            print(f"{'扫描编号':<40} {'目标':<24} {'状态':<14} {'样本':>5} {'命中':>4}")
+            for row in rows:
+                print(f"{row['scan_id']:<40} {row['target']:<24} "
+                      f"{row['status']:<14} {row['total_samples']:>5} "
+                      f"{row['success_count']:>4}")
+            return
+        result = await _load_scan_result(runtime, runtime.storage, args.scan)
+        from .reporter import write_report
+        md_path, json_path = write_report(
+            result, cfg.out_dir, probe=result.probe,
+            base_url=cfg.target.base_url, audit_path=result.audit_path)
+        print(f"报告已生成: {md_path}\nJSON: {json_path}")
+        if args.json:
+            print(json.dumps(json.load(open(json_path, encoding="utf-8")),
+                             ensure_ascii=False, indent=2))
+        else:
+            print("\n" + open(md_path, encoding="utf-8").read())
+    finally:
+        await runtime.close()
+
+
+async def cmd_bench(args: argparse.Namespace) -> None:
+    """自适应优先级基准：随机基线序 vs 自适应序（wanter 地形学过一轮后）。
+
+    指标（确定性可复现）：
+    - 命中率@预算：不同样本预算下两种顺序的漏洞命中率；
+    - 覆盖效率：发现全部漏洞类别所需样本数（越少越好）。
+    """
+    from target_lab import build_default_guards_file, planted_categories, start_lab
+    cfg = ScanConfig.from_yaml(args.config)
+    cfg.adaptive.enabled = True
+    with tempfile.TemporaryDirectory(prefix="dsh-redteam-bench-") as tmp:
+        guards_file = os.path.join(tmp, "guards.yml")
+        build_default_guards_file(guards_file)
+        cfg.target.guards_file = guards_file
+        lab = start_lab(guards_file=guards_file, port=0)
+        cfg.target.base_url = lab.base_url
+        try:
+            from .runtime import RedTeamRuntime
+            from .engine import ScanRunner, build_adapter
+            runtime = RedTeamRuntime(cfg)
+            await runtime.start()
+            adapter = None
+            try:
+                adapter = build_adapter(cfg)
+                # 第一轮：随机基线（"新手扫描"）
+                runner1 = ScanRunner(runtime, cfg, adapter, scan_mode="bench-1",
+                                     order="random")
+                result1 = await runner1.run()
+                # 第二轮：自适应顺序（wanter 地形已学第一轮结果）
+                runner2 = ScanRunner(runtime, cfg, adapter, scan_mode="bench-2",
+                                     order="adaptive")
+                result2 = await runner2.run()
+                _print_bench(result1, result2, planted_categories(),
+                             runtime.terrain.stats())
+            finally:
+                if adapter is not None:
+                    await adapter.close()
+                await runtime.close()
+        finally:
+            lab.stop()
+
+
+def _bench_rows(result) -> List[tuple]:
+    """按执行顺序返回 (类别, 是否命中)。"""
+    from .models import Verdict
+    pairs = []
+    for verdict in result.verdicts:
+        if verdict.verdict == Verdict.ERROR.value:
+            continue
+        pairs.append((verdict.category, verdict.success))
+    return pairs
+
+
+def _first_hit_positions(pairs: List[tuple]) -> Dict[str, int]:
+    positions: Dict[str, int] = {}
+    for index, (category, hit) in enumerate(pairs):
+        if hit and category not in positions:
+            positions[category] = index + 1
+    return positions
+
+
+def _print_bench(result1, result2, planted: set,
+                 terrain_stats: Dict[str, Any]) -> None:
+    pairs1 = _bench_rows(result1)
+    pairs2 = _bench_rows(result2)
+    n = len(pairs1)
+    print(f"\n自适应攻击优先级基准（{n} 条样本，wanter 势能地形）")
+    print(f"{'预算':<8} {'随机基线命中率':>14} {'自适应命中率':>14} {'提升':>8}")
+    for budget in (0.25, 0.5, 0.75, 1.0):
+        k = max(1, int(n * budget))
+        rate1 = sum(h for _, h in pairs1[:k]) / k
+        rate2 = sum(h for _, h in pairs2[:k]) / k
+        gain = (rate2 - rate1) / rate1 * 100 if rate1 > 0 else 0.0
+        print(f"{int(budget * 100):<6}% {rate1:>13.1%} {rate2:>13.1%} "
+              f"{gain:>+7.1f}%")
+    pos1 = _first_hit_positions(pairs1)
+    pos2 = _first_hit_positions(pairs2)
+    found1 = planted & set(pos1)
+    found2 = planted & set(pos2)
+    cover1 = max((pos1[c] for c in found1), default=n)
+    cover2 = max((pos2[c] for c in found2), default=n)
+    speedup = (cover1 - cover2) / cover1 * 100 if cover1 else 0.0
+    print(f"\n覆盖效率（发现全部漏洞类别所需样本数）:")
+    print(f"  随机基线: {cover1} 条 ｜ 自适应: {cover2} 条 ｜ 提速 {speedup:+.1f}%")
+    print(f"地形统计: {terrain_stats['events']} 条沉积 "
+          f"(成功 {terrain_stats['success_traces']} / "
+          f"失败 {terrain_stats['failed_traces']})，"
+          f"净刻蚀深度 {terrain_stats['net_depth']}")
+
+
+async def cmd_demo(args: argparse.Namespace) -> None:
+    """一键演示：起靶场 → 扫描 → 报告 → 修复 → 回归 → 验收对比。"""
+    from target_lab import (build_default_guards_file, planted_categories,
+                            start_lab)
+    os.makedirs(args.out, exist_ok=True)
+    guards_file = os.path.join(args.out, "lab_guards.yml")
+    build_default_guards_file(guards_file)
+    lab = start_lab(guards_file=guards_file, port=args.port)
+    planted_count = len(planted_categories())
+    print(f"① 靶场已启动（{planted_count} 个埋入漏洞全部开启，"
+          f"含电商/教育/金融/SaaS 业务场景）: {lab.base_url}")
+
+    cfg = ScanConfig.from_dict({
+        "profile": "quick",
+        "target": {"name": "demo-ecommerce-lab", "type": "lab",
+                   "base_url": lab.base_url, "guards_file": guards_file},
+        "vectors": {"variants_per_sample": 2, "seed": 42},
+        "detector": {"baseline": True},
+        "blueteam": {"enabled": True, "sandbox_dir": os.path.join(args.out, "sandbox")},
+        "adaptive": {"enabled": True},
+        "storage": {"db_path": os.path.join(args.out, "redteam.db"),
+                    "audit_dir": os.path.join(args.out, "audit")},
+        "out_dir": os.path.join(args.out, "reports"),
+    })
+    from .runtime import RedTeamRuntime
+    from .engine import ScanRunner, build_adapter
+    from .blueteam import BlueEngine
+    runtime = RedTeamRuntime(cfg)
+    await runtime.start()
+    adapter = None
+    try:
+        adapter = build_adapter(cfg)
+        # ② 红队扫描
+        runner = ScanRunner(runtime, cfg, adapter, scan_mode="demo")
+        result = await runner.run()
+        found = {f.category for f in result.findings}
+        planted = planted_categories()
+        rate = len(found & planted) / len(planted) * 100
+        print(f"② 红队扫描：{result.success_count} 次攻击成功，"
+              f"发现 {len(result.findings)} 条漏洞（{len(found & planted)}/"
+              f"{len(planted)} 类埋入漏洞，发现率 {rate:.0f}%）")
+        _print_scan_summary(result)
+        # ③ 蓝队修复 + 回归
+        print("\n③ 蓝队修复……")
+        blue = BlueEngine(runtime, cfg, adapter, result)
+        outcome = await blue.run(apply_fixes=True)
+        summary = outcome.summary()
+        print(f"   修复方案 {summary['plans']} 条 → 应用 {summary['applied']} 条"
+              f" → 回归通过 {summary['verified']} 条")
+        # ④ 复扫验收（同一攻击重跑，应 0 命中）
+        print("\n④ 修复后复扫验收……")
+        adapter2 = build_adapter(cfg)
+        runner2 = ScanRunner(runtime, cfg, adapter2, scan_mode="demo-verify")
+        result2 = await runner2.run()
+        await adapter2.close()
+        print(f"   复扫命中：{result2.success_count} 条"
+              f"（修复前 {result.success_count} 条）")
+        if result2.success_count == 0:
+            print("\n  🎉 验收通过：修复后同一攻击重跑 0 命中，闭环完整。")
+        else:
+            print("\n  ⚠️ 复扫仍有命中，请检查修复与回归结果。")
+    finally:
+        if adapter is not None:
+            await adapter.close()
+        await runtime.close()
+        lab.stop()
+
+
+def cmd_samples(args: argparse.Namespace) -> None:
+    from ._compat import ensure_dsh
+    ensure_dsh()
+    from .vectors.registry import VectorRegistry
+    from dsh.kernel import Context
+    ctx = Context("samples")
+    registry = VectorRegistry(ctx, {})
+    registry.apply(ctx)
+    if args.action == "list":
+        print(f"攻击样本库：{len(registry.samples)} 条基础样本，"
+              f"{len(registry.categories())} 个分类\n")
+        for category in registry.categories():
+            samples = [s for s in registry.samples if s.category == category]
+            surfaces = {s.surface for s in samples}
+            print(f"  {category:<22} {len(samples):>3} 条  "
+                  f"[{'/'.join(sorted(surfaces))}]")
+        print("\n用法: dsh-redteam samples show <category>")
+        return
+    category = args.category
+    if category not in registry.categories():
+        raise RedTeamError(f"分类不存在: {category}（见 samples list）")
+    for sample in registry.samples:
+        if sample.category != category:
+            continue
+        print(f"  {sample.id}  [{sample.severity}] {sample.name}")
+        print(f"      OWASP: {sample.owasp} ｜ 面: {sample.surface} "
+              f"｜ 角色: {','.join(sample.role_context) or '全部'}")
+        print(f"      载荷: {sample.payload.strip()[:100]}")
+        if sample.evidence_patterns:
+            print(f"      证据: {sample.evidence_patterns}")
+
+
+def cmd_scenarios(args: argparse.Namespace) -> None:
+    from .scenarios import SCENARIOS, sample_categories_for
+    if args.action == "list":
+        print(f"业务场景库：{len(SCENARIOS)} 大业务场景\n")
+        for scenario in SCENARIOS:
+            print(f"  {scenario.id:<14} {scenario.name}")
+            print(f"      指纹: {', '.join(scenario.path_keywords[:6])}…")
+            print(f"      专属样本类别: {', '.join(scenario.sample_categories)}")
+        print("\n用法: dsh-redteam scenarios show <scenario_id>")
+        return
+    from .scenarios import get_scenario
+    scenario = get_scenario(args.scenario or "")
+    if scenario is None:
+        raise RedTeamError(f"场景不存在: {args.scenario}（见 scenarios list）")
+    print(f"{scenario.name}（{scenario.id}）\n  {scenario.description}")
+    print(f"  路径指纹: {scenario.path_keywords}")
+    print(f"  端点指纹: {scenario.endpoint_keywords}")
+    print(f"  内容指纹: {scenario.content_keywords}")
+    print(f"  专属样本类别: {scenario.sample_categories}")
+
+
+if __name__ == "__main__":
+    sys.exit(main())

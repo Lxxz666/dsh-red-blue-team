@@ -1,0 +1,42 @@
+{
+  "seeds": 20,
+  "ab": {
+    "A": {
+      "escape_rate": 0.0,
+      "mean_steps_to_escape": null,
+      "mean_erosion_count": 0,
+      "final_x_mean": 1.215,
+      "final_x_std": 0.0
+    },
+    "B": {
+      "escape_rate": 0.0,
+      "mean_steps_to_escape": null,
+      "mean_erosion_count": 0,
+      "final_x_mean": 1.22,
+      "final_x_std": 0.035
+    },
+    "wanter": {
+      "escape_rate": 1.0,
+      "mean_steps_to_escape": 386.5,
+      "mean_erosion_count": 9.8,
+      "final_x_mean": 2.617,
+      "final_x_std": 0.015
+    }
+  },
+  "learning": {
+    "no_deposit_first5_mean": 33.8,
+    "no_deposit_last5_mean": 28.6,
+    "with_deposit_first5_mean": 242.8,
+    "with_deposit_last5_mean": 4.4,
+    "slope_no_deposit": -0.67,
+    "slope_with_deposit": -21.76
+  },
+  "perf": {
+    "density_0": 0.2,
+    "density_1000": 1475.7,
+    "density_5000": 7036.3,
+    "cap_events": 100,
+    "half_life_theory": 3.4657,
+    "half_life_measured": 3.4657
+  }
+}

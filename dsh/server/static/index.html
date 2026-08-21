@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>dsh-python · DeepSeek Harness (Python)</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <aside id="sidebar">
+    <div class="brand">
+      <span class="logo">dsh</span><span>python</span>
+    </div>
+    <button id="btn-new" class="new-btn">＋ 新会话</button>
+    <div id="session-list" class="session-list"></div>
+    <div class="sidebar-foot">
+      <div id="providers" class="providers">providers: …</div>
+      <div class="hint">斜杠命令: /help /goal /compact /plan</div>
+    </div>
+  </aside>
+
+  <main id="main">
+    <header id="topbar">
+      <div id="session-title">新会话</div>
+      <div class="topbar-right">
+        <span id="status" class="status idle">idle</span>
+        <button id="btn-cancel" class="cancel-btn" title="停止当前 turn">■ 停止</button>
+      </div>
+    </header>
+    <div id="messages" class="messages"></div>
+    <footer id="inputbar">
+      <textarea id="input" rows="1" placeholder="输入消息或 / 命令…（Enter 发送，Shift+Enter 换行）"></textarea>
+      <button id="btn-send" class="send-btn">发送</button>
+    </footer>
+  </main>
+
+  <div id="modal" class="modal hidden">
+    <div class="modal-box">
+      <div class="modal-title">需要人工确认</div>
+      <div id="modal-question" class="modal-question"></div>
+      <div id="modal-detail" class="modal-detail"></div>
+      <textarea id="modal-input" class="modal-input hidden" rows="3" placeholder="输入你的回答…"></textarea>
+      <div class="modal-actions">
+        <button id="modal-deny" class="danger">拒绝</button>
+        <button id="modal-allow" class="primary">允许</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

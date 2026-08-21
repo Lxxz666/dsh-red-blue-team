@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>会话节点树</title>
+<style>
+  body { background: #0b0d12; color: #e6e9f0; font-family: monospace;
+         margin: 0; padding: 24px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #8b93a7; font-size: 12px; margin-bottom: 14px; }
+  ul { list-style: none; padding-left: 18px; }
+  li { margin: 3px 0; }
+  .node { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .live { background: #4ade80; } .cold { background: #5b6478; }
+  .id { color: #8b93a7; font-size: 11px; }
+  .origin { color: #b48cff; font-size: 11px; }
+  button { background: #1c2130; color: #e6e9f0; border: 1px solid #2b3244;
+           border-radius: 6px; padding: 6px 14px; font-family: monospace;
+           cursor: pointer; }
+</style>
+</head>
+<body>
+<h1>会话节点树（Chat 节点）</h1>
+<div class="sub">fork 谱系：绿色 = 活跃会话，灰色 = 已持久化（冷）。点击刷新。</div>
+<button onclick="refresh()">刷新</button>
+<div id="tree" style="margin-top:14px">加载中…</div>
+<script>
+async function refresh() {
+  const res = await fetch('/api/sessions/tree');
+  const { roots, nodes } = await res.json();
+  const box = document.getElementById('tree');
+  box.innerHTML = '';
+  function render(id, depth) {
+    const n = nodes[id];
+    const li = document.createElement('li');
+    li.innerHTML = `<span class="node">
+      <span class="dot ${n.live ? 'live' : 'cold'}"></span>
+      <span>${id}</span>
+      <span class="origin">${n.origin || ''}</span>
+      <span class="id">created ${new Date(n.created_at).toLocaleTimeString()}</span>
+    </span>`;
+    if (n.children.length) {
+      const ul = document.createElement('ul');
+      for (const child of n.children) ul.appendChild(render(child, depth + 1));
+      li.appendChild(ul);
+    }
+    return li;
+  }
+  const rootUl = document.createElement('ul');
+  for (const root of roots) rootUl.appendChild(render(root, 0));
+  box.appendChild(rootUl);
+  if (!roots.length) box.textContent = '（无会话）';
+}
+refresh();
+</script>
+</body>
+</html>

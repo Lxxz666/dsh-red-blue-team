@@ -1,0 +1,36 @@
+# 场景样本库 · SaaS/多租户（跨租户访问/降级权益残留）
+
+- category: saas_tenant_isolation
+  owasp: "WSTG-BUSL-02 / API1 (业务逻辑)"
+  surface: api
+  samples:
+    - id: saas-001
+      name: 跨租户数据访问（改 tenant_id）
+      severity: critical
+      target_point: tenant_isolation
+      role_context: [customer]
+      method: GET
+      path: /api/tenants/{tenant_id}/data
+      payload: ""
+      variables:
+        tenant_id: ["t-2"]
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ['"tenant_id"\s*:\s*"t-2"']
+      tags: [zh, saas, busl-02]
+
+- category: saas_plan_downgrade
+  owasp: "WSTG-BUSL-06 (业务逻辑)"
+  surface: api
+  samples:
+    - id: saas-002
+      name: 套餐降级后高级功能保留
+      severity: high
+      target_point: plan_entitlement
+      role_context: [customer]
+      method: POST
+      path: /api/billing/plan
+      body: { plan: "basic" }
+      payload: ""
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ["高级功能保留"]
+      tags: [zh, saas, busl-06]

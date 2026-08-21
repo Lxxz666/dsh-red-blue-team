@@ -1,0 +1,36 @@
+# 本地项目文件夹静态扫描配置示例
+# 用法: dsh-redteam scan --config examples/scan_folder.yaml
+#   或快速免配置: dsh-redteam static <项目文件夹路径>
+
+profile: quick
+
+target:
+  name: my-project
+  type: folder                  # 文件夹静态扫描（代码级审计，无需授权声明）
+  folder_path: "."              # 要扫描的项目文件夹
+  scenario: auto                # 业务场景识别：auto / 显式如 ecommerce,education
+
+vectors:
+  categories: [all]             # 静态扫描不使用网络样本，保留配置
+  variants_per_sample: 1
+
+detector:
+  baseline: false
+  llm_judge: false
+
+blueteam:
+  enabled: false
+  sandbox_dir: "./sandbox"
+
+adaptive:
+  enabled: true
+
+storage:
+  db_path: "./redteam.db"
+  audit_dir: "./audit"
+
+engine:
+  concurrency: 4
+  agent_mode: true              # 主Agent+子Agent 编排（静态子代理）
+
+out_dir: "./reports"

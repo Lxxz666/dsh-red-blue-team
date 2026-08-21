@@ -1,0 +1,261 @@
+# dsh-base 对应的 base bundle：脊柱 + 内置能力的第一层组合。
+# 每行: id / plugin(module:Attr) / config / disabled。
+# 用户可在 cordis.patch.yml 里按 id 整体替换 config，或 disable。
+
+- id: sessions
+  plugin: dsh.session.store:SessionStore
+
+- id: system-prompt
+  plugin: dsh.prompt.system_prompt:SystemPromptService
+
+- id: tools
+  plugin: dsh.tools.registry:ToolRuntime
+
+# Code Mode 执行后端（in-process Python）：tools mode: code/both 时必需。
+# max_output_bytes = 外层 logs + 完成值的 JSON 字节预算；timeout_ms = 程序预算。
+- id: code-runtime
+  plugin: dsh.code.runtime:CodeRuntime
+  config:
+    max_output_bytes: 67108864
+    timeout_ms: 30000
+
+# 自指 cordis：动态 Cordis 插件运行器（host-only；client 半仅存储）。
+# requires_approval=True 时每次运行经 ctx.approval 审批门控
+# （awaiting-approval 状态 + cordis/request-run(-resolved) 事件）。
+- id: dynamic-cordis
+  plugin: dsh.cordis.runner:DynamicCordisRunnerService
+  config:
+    vm_timeout_ms: 5000
+    requires_approval: false
+
+- id: tool-cordis
+  plugin: dsh.cordis.tools:ToolCordisPlugin
+
+- id: llm
+  plugin: dsh.llm.adapters:LlmRuntime
+
+- id: llm-deepseek
+  plugin: dsh.llm.plugins:DeepSeekAdapterPlugin
+
+- id: llm-mock
+  plugin: dsh.llm.plugins:MockAdapterPlugin
+
+- id: agent-default-options
+  plugin: dsh.agent.plugins:DefaultOptionsPlugin
+
+- id: agents
+  plugin: dsh.agent.agent:AgentRegistry
+
+- id: agent-loop
+  plugin: dsh.agent.loop:AgentLoopService
+
+- id: approval
+  plugin: dsh.agent.approval:ApprovalService
+
+- id: persistence
+  plugin: dsh.persistence.jsonl:JsonlPersistence
+  config:
+    dir: ~/.dsh/sessions
+
+- id: persona
+  plugin: dsh.prompt.sections:PersonaPlugin
+
+- id: fs
+  plugin: dsh.fs.local:LocalFsService
+
+- id: tool-fs
+  plugin: dsh.fs.tool_fs:ToolFsPlugin
+
+- id: subprocess
+  plugin: dsh.subprocess.local:SubprocessService
+
+- id: tool-bash
+  plugin: dsh.subprocess.tool_bash:ToolBashPlugin
+
+- id: jobs
+  plugin: dsh.jobs.jobs:JobsService
+
+- id: tool-jobs
+  plugin: dsh.jobs.jobs:ToolJobsPlugin
+
+- id: todo-tool
+  plugin: dsh.todo.todo:ToolTodoPlugin
+
+- id: subagents
+  plugin: dsh.subagent.subagent:SubagentRegistry
+
+- id: subagent-in-process
+  plugin: dsh.subagent.subagent:InProcessProviderPlugin
+
+- id: tool-subagent
+  plugin: dsh.subagent.subagent:ToolSubagentPlugin
+
+- id: goals
+  plugin: dsh.goal.goal:GoalService
+
+- id: goal-round-driver
+  plugin: dsh.goal.goal:GoalRoundDriverPlugin
+
+- id: tool-goals
+  plugin: dsh.goal.goal:ToolGoalPlugin
+
+- id: compaction
+  plugin: dsh.compaction.compaction:CompactionService
+
+- id: compaction-policy
+  plugin: dsh.compaction.compaction:CompactionPolicyPlugin
+
+- id: tool-result-pruner
+  plugin: dsh.compaction.pruner:ToolResultPrunerService
+
+- id: commands
+  plugin: dsh.commands.commands:CommandRegistry
+
+- id: commands-builtin
+  plugin: dsh.commands.commands:BuiltinCommandsPlugin
+
+- id: plan-mode
+  plugin: dsh.plan.plan_mode:PlanModeService
+
+- id: plan-plugin
+  plugin: dsh.plan.plan_mode:PlanModePlugin
+
+- id: session-title
+  plugin: dsh.session.title:SessionTitleService
+
+- id: session-query
+  plugin: dsh.session.query:SessionQueryService
+
+- id: telemetry
+  plugin: dsh.telemetry.service:SessionTelemetryService
+
+- id: telemetry-console
+  plugin: dsh.telemetry.service:ConsoleTelemetryPlugin
+  config:
+    enabled: false
+
+- id: settings
+  plugin: dsh.settings.service:SettingsService
+
+- id: credentials
+  plugin: dsh.credentials.credentials:CredentialsService
+
+- id: token-meter
+  plugin: dsh.llm.token_meter:TokenMeterService
+
+- id: storage
+  plugin: dsh.storage.service:StorageService
+
+# 会话投影 seam：框架驱动、领域计算（todos / session_stats 内建单元）。
+- id: session-projections
+  plugin: dsh.projection.projection:SessionProjectionRegistry
+
+- id: projection-units
+  plugin: dsh.projection.units:ProjectionUnitsPlugin
+
+# 工作区实体注册表（host 侧可选能力；活跃会话按 header.cwd 记账）。
+- id: workspace-registry
+  plugin: dsh.workspace.workspace:WorkspaceRegistry
+
+- id: workspace-sessions
+  plugin: dsh.workspace.workspace:SessionWorkspacePlugin
+
+# 跨会话有界快照（host 侧 mention 支持的可选能力）。
+- id: session-reference
+  plugin: dsh.context.session_reference:SessionReferenceResolver
+
+- id: web-tools
+  plugin: dsh.web.tool:WebPlugin
+
+- id: user-questions
+  plugin: dsh.interaction.user_questions:UserQuestionsService
+
+- id: ask-user-tool
+  plugin: dsh.interaction.user_questions:ToolAskUserPlugin
+
+- id: time-context
+  plugin: dsh.context.time_context:TimeContextPlugin
+
+- id: agent-instructions
+  plugin: dsh.context.instructions:AgentInstructionsPlugin
+
+# 与 JSONL 互斥：同一时刻只能启用一个 sessionPersistence 后端
+# （同时启用会双写）。切换 = disable 其一 + enable 另一。
+- id: persistence-sqlite
+  plugin: dsh.persistence.sqlite:SqlitePersistence
+  disabled: true
+
+- id: skills
+  plugin: dsh.skill.skill:SkillService
+
+- id: skills-plugin
+  plugin: dsh.skill.skill:SkillsPlugin
+
+- id: hooks
+  plugin: dsh.hooks.hooks:HooksPlugin
+
+# Claude Code / Codex hooks 兼容桥：无配置文件时 no-op（按发现顺序读取）。
+- id: hooks-compat
+  plugin: dsh.hooks.compat:HooksCompatPlugin
+
+- id: agent-presets
+  plugin: dsh.preset.presets:AgentPresets
+
+- id: schedule
+  plugin: dsh.schedule.schedule:ScheduleService
+
+- id: tool-schedule
+  plugin: dsh.schedule.schedule:ToolSchedulePlugin
+
+# 进程限制缝：mode auto（win32=Job Object kill-on-close，否则 local identity）；
+# jobobject 可配 memory_limit_mb 整组内存上限（64 位 Windows）。
+- id: sandbox
+  plugin: dsh.sandbox.sandbox:SandboxService
+  config:
+    mode: auto
+
+- id: message-feedback
+  plugin: dsh.feedback.feedback:MessageFeedbackService
+
+# 原生记忆（对应 TS 版 mcp-memory 的内部形态）：service + memory_* 工具。
+- id: memory
+  plugin: dsh.memory.memory:MemoryService
+
+- id: tool-memory
+  plugin: dsh.memory.memory:ToolMemoryPlugin
+
+- id: workflow-engine
+  plugin: dsh.workflow.workflow:WorkflowEngine
+
+# MCP 示例行（默认禁用）：启用时把 command 指向你的 MCP 服务器（stdio JSON-RPC），
+# 启动后其工具自动注册进 ctx.tools（prefix 可选前缀；schema 超出子集时降级透传）。
+- id: mcp-example
+  plugin: dsh.mcp.mcp:McpServerPlugin
+  disabled: true
+  config:
+    command: [python, tests/fixtures/mock_mcp_server.py]
+    prefix: ""
+
+# wanter（water+ant）动力学：全局势能地形 + 水迹蒸发 + 洼地侵蚀。
+# 引擎参数（λ/β/α/τ/D/η/γ…）见 manuals/16-wanter架构设计手册.md。
+- id: wanter-engine
+  plugin: dsh.wanter.engine:WanterEngine
+  config:
+    goal: [3.0, 0.0]
+
+- id: wanter-plugin
+  plugin: dsh.wanter.plugin:WanterPlugin
+
+- id: tool-wanter-goals
+  plugin: dsh.wanter.plugin:ToolWanterGoalsPlugin
+
+# 配置热重载：boot 会把 profile/home 的 cordis.patch.yml 路径注入本行。
+- id: config-watcher
+  plugin: dsh.config.watcher:ConfigWatcherPlugin
+  config:
+    paths: []
+    interval: 2.0
+
+
+- id: tool-workflow
+  plugin: dsh.workflow.workflow:ToolWorkflowPlugin

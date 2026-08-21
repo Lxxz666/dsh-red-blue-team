@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wanter 地形面板</title>
+<style>
+  body { background: #0b0d12; color: #e6e9f0; font-family: monospace;
+         margin: 0; padding: 24px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: #8b93a7; font-size: 12px; margin-bottom: 16px; }
+  .grid { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+  .card { background: #12151c; border: 1px solid #232836; border-radius: 8px;
+          padding: 12px; }
+  .card img { display: block; }
+  table { border-collapse: collapse; font-size: 12px; }
+  td { padding: 4px 10px; border-bottom: 1px solid #1c2130; }
+  td:first-child { color: #8b93a7; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+         margin-right: 6px; }
+</style>
+</head>
+<body>
+<h1>wanter 势能地形</h1>
+<div class="sub">water + ant：Φ = Φ_goal + Φ_base + Φ_trace + Φ_erosion · 每 3 秒刷新</div>
+<div class="grid">
+  <div class="card"><img id="terrain" src="/api/wanter/terrain" alt="地形"></div>
+  <div class="card" id="state">加载中…</div>
+</div>
+<script>
+const STATE = document.getElementById('state');
+async function refresh() {
+  try {
+    const img = document.getElementById('terrain');
+    img.src = '/api/wanter/terrain?t=' + Date.now();
+    const res = await fetch('/api/wanter/state');
+    if (!res.ok) { STATE.textContent = 'wanter 未挂载'; return; }
+    const s = await res.json();
+    const goals = (s.goals || []).map(g =>
+      `<tr><td>目标势阱</td><td>${g[0].map(v => v.toFixed(2)).join(', ')}（强度 ${g[1]}）</td></tr>`).join('');
+    STATE.innerHTML = `<table>
+      <tr><td>维度</td><td>${s.dim}</td></tr>
+      <tr><td>核宽 σ</td><td>${s.sigma}</td></tr>
+      <tr><td>迹事件</td><td>${s.trace_events}（λ=${s.trace_decay_rate}）</td></tr>
+      <tr><td>侵蚀坑</td><td>${s.erosion_bumps}</td></tr>
+      ${goals}
+    </table>
+    <div class="sub" style="margin-top:8px">
+      <span class="dot" style="background:#4ade80"></span>目标势阱
+      <span class="dot" style="background:#ff6b6b"></span>侵蚀坑
+      <span class="dot" style="background:#7a5cff"></span>迹事件</div>`;
+  } catch (e) { STATE.textContent = '加载失败: ' + e; }
+}
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>

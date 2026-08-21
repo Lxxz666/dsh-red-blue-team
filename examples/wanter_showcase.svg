@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="620" viewBox="0 0 980 620">
+<rect width="980" height="620" fill="#0f1115"/>
+<text x="24" y="30" fill="#e6e9f0" font-size="17" font-family="monospace">wanter（water+ant）量化指标总览</text>
+<text x="24" y="50" fill="#8b93a7" font-size="12" font-family="monospace">脚本复现：wanter_benchmark.py / wanter_embedding_calibration.py（确定性种子，离线可复现）</text>
+<rect x="24" y="70" width="296" height="240" rx="8" fill="#12151c" stroke="#232836"/>
+<text x="38" y="96" fill="#e6e9f0" font-size="15" font-family="monospace">双势阱逃逸率（20 种子）</text>
+<rect x="46" y="276.0" width="56" height="0.0" fill="#ff6b6b"/>
+<text x="74" y="270" fill="#e6e9f0" font-size="12" font-family="monospace" text-anchor="middle">0%</text>
+<text x="74" y="294" fill="#8b93a7" font-size="11" font-family="monospace">A 纯梯度</text>
+<rect x="138" y="276.0" width="56" height="0.0" fill="#ff6b6b"/>
+<text x="166" y="270" fill="#e6e9f0" font-size="12" font-family="monospace" text-anchor="middle">0%</text>
+<text x="166" y="294" fill="#8b93a7" font-size="11" font-family="monospace">B 梯度+噪声</text>
+<rect x="230" y="156.0" width="56" height="120.0" fill="#4ade80"/>
+<text x="258" y="150" fill="#e6e9f0" font-size="12" font-family="monospace" text-anchor="middle">100%</text>
+<text x="258" y="294" fill="#8b93a7" font-size="11" font-family="monospace">wanter</text>
+<text x="40" y="298" fill="#8b93a7" font-size="11" font-family="monospace">wanter 平均 386 步 · 9.8 次侵蚀 · 落点 2.62±0.01</text>
+<rect x="344" y="70" width="296" height="240" rx="8" fill="#12151c" stroke="#232836"/>
+<text x="358" y="96" fill="#e6e9f0" font-size="15" font-family="monospace">路径复用学习斜率</text>
+<rect x="404" y="273.3" width="56" height="2.7" fill="#ff6b6b"/>
+<text x="432" y="267" fill="#e6e9f0" font-size="12" font-family="monospace" text-anchor="middle">-0.7</text>
+<rect x="514" y="189.0" width="56" height="87.0" fill="#4ade80"/>
+<text x="542" y="183" fill="#e6e9f0" font-size="12" font-family="monospace" text-anchor="middle">-21.8</text>
+<text x="432" y="294" fill="#8b93a7" font-size="11" font-family="monospace">无沉积</text>
+<text x="542" y="294" fill="#8b93a7" font-size="11" font-family="monospace">有沉积（≈30×）</text>
+<text x="360" y="298" fill="#8b93a7" font-size="11" font-family="monospace">后 5 次均值：无沉积 29 步 vs 有沉积 4.4 步</text>
+<rect x="664" y="70" width="296" height="240" rx="8" fill="#12151c" stroke="#232836"/>
+<text x="678" y="96" fill="#e6e9f0" font-size="15" font-family="monospace">语义坐标校准（多目标匹配）</text>
+<rect x="724" y="276.0" width="56" height="0.0" fill="#ff6b6b"/>
+<text x="752" y="270" fill="#e6e9f0" font-size="12" font-family="monospace" text-anchor="middle">0%</text>
+<rect x="834" y="156.0" width="56" height="120.0" fill="#4ade80"/>
+<text x="862" y="150" fill="#e6e9f0" font-size="12" font-family="monospace" text-anchor="middle">100%</text>
+<text x="752" y="294" fill="#8b93a7" font-size="11" font-family="monospace">hash 伪嵌入</text>
+<text x="862" y="294" fill="#8b93a7" font-size="11" font-family="monospace">oracle 语义</text>
+<text x="680" y="298" fill="#8b93a7" font-size="11" font-family="monospace">平均步数：hash 282 vs oracle 1</text>
+<rect x="24" y="330" width="936" height="250" rx="8" fill="#12151c" stroke="#232836"/>
+<text x="38" y="356" fill="#e6e9f0" font-size="15" font-family="monospace">性能与蒸发（半衰期 ln2/λ）</text>
+<text x="40" y="382" fill="#8b93a7" font-size="12" font-family="monospace">density_at 查询耗时（0/1k/5k 事件）</text>
+<text x="420" y="382" fill="#e6e9f0" font-size="12" font-family="monospace">0.2 / 1475.7 / 7036.3 µs</text>
+<text x="40" y="422" fill="#8b93a7" font-size="12" font-family="monospace">事件容量上限（max_events=100）</text>
+<text x="420" y="422" fill="#e6e9f0" font-size="12" font-family="monospace">500 次沉积 → 钳制 100 ✓</text>
+<text x="40" y="462" fill="#8b93a7" font-size="12" font-family="monospace">迹蒸发半衰期（λ=0.2）</text>
+<text x="420" y="462" fill="#e6e9f0" font-size="12" font-family="monospace">理论 3.4657s · 实测 3.4657s（误差 <1e-4）✓</text>
+<text x="40" y="502" fill="#7a5cff" font-size="12" font-family="monospace">① 势能地形</text>
+<text x="230" y="502" fill="#e6e9f0" font-size="12" font-family="monospace">Φ = Φ_goal + Φ_base + Φ_trace + Φ_erosion</text>
+<text x="40" y="528" fill="#7a5cff" font-size="12" font-family="monospace">② 水迹沉积/蒸发</text>
+<text x="230" y="528" fill="#e6e9f0" font-size="12" font-family="monospace">∂T/∂t = βρ − λT（旧路径更低 → 新水流优先沿旧径）</text>
+<text x="40" y="554" fill="#7a5cff" font-size="12" font-family="monospace">③ Langevin 流动</text>
+<text x="230" y="554" fill="#e6e9f0" font-size="12" font-family="monospace">dx = −∇Φ dt + √(2D) dW（软最小 Boltzmann 选向）</text>
+<text x="40" y="580" fill="#7a5cff" font-size="12" font-family="monospace">④ 洼地侵蚀</text>
+<text x="230" y="580" fill="#e6e9f0" font-size="12" font-family="monospace">停滞检测 → 目标方向偏置开挖 + 退火（逃出局部最优）</text>
+</svg>

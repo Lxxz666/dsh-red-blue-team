@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="300" viewBox="0 0 640 300">
+<rect width="640" height="300" fill="#0f1115"/>
+<text x="20" y="26" fill="#e6e9f0" font-size="15" font-family="monospace">wanter 语义坐标校准：hash 伪嵌入 vs oracle 语义嵌入</text>
+<text x="20" y="46" fill="#8b93a7" font-size="11" font-family="monospace">多目标匹配实验（4 任务 × 8 种子；oracle = 与目标布局对齐的模拟嵌入）</text>
+<text x="120" y="278" fill="#8b93a7" font-size="12" font-family="monospace">匹配率 %</text>
+<text x="400" y="278" fill="#8b93a7" font-size="12" font-family="monospace">平均步数（越小越好）</text>
+<rect x="120" y="254.0" width="64" height="0.0" fill="#ff6b6b"/>
+<text x="152" y="248" fill="#e6e9f0" font-size="13" font-family="monospace" text-anchor="middle">0%</text>
+<rect x="216" y="40.0" width="64" height="214.0" fill="#4ade80"/>
+<text x="248" y="34" fill="#e6e9f0" font-size="13" font-family="monospace" text-anchor="middle">100%</text>
+<rect x="400" y="40.0" width="64" height="214.0" fill="#ff6b6b"/>
+<text x="432" y="34" fill="#e6e9f0" font-size="13" font-family="monospace" text-anchor="middle">282</text>
+<rect x="496" y="253.2" width="64" height="0.8" fill="#4ade80"/>
+<text x="528" y="247" fill="#e6e9f0" font-size="13" font-family="monospace" text-anchor="middle">1</text>
+<text x="152" y="292" fill="#8b93a7" font-size="11" font-family="monospace">hash</text>
+<text x="248" y="292" fill="#8b93a7" font-size="11" font-family="monospace">oracle</text>
+<text x="432" y="292" fill="#8b93a7" font-size="11" font-family="monospace">hash</text>
+<text x="528" y="292" fill="#8b93a7" font-size="11" font-family="monospace">oracle</text>
+</svg>

@@ -1,0 +1,69 @@
+# 场景样本库 · 教育/在线学习（成绩越权/答案泄露/成绩篡改/考试时间）
+
+- category: edu_score_idor
+  owasp: "WSTG-BUSL-02 / API1 (业务逻辑)"
+  surface: api
+  samples:
+    - id: edu-001
+      name: 成绩查询越权（查他人成绩）
+      severity: critical
+      target_point: cross_student_score
+      role_context: [student]
+      method: GET
+      path: /api/scores/{user_id}
+      payload: ""
+      variables:
+        user_id: ["1"]
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ['"student"\s*:\s*"张三"', "张三"]
+      tags: [zh, education, busl-02]
+
+- category: edu_answer_leak
+  owasp: "WSTG-BUSL-03 (业务逻辑)"
+  surface: api
+  samples:
+    - id: edu-002
+      name: 考试标准答案泄露
+      severity: critical
+      target_point: answer_disclosure
+      role_context: [student]
+      method: GET
+      path: /api/exams/101/answers
+      payload: ""
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ["标准答案"]
+      tags: [zh, education, busl-03]
+
+- category: edu_score_tamper
+  owasp: "WSTG-BUSL-02 (业务逻辑)"
+  surface: api
+  samples:
+    - id: edu-003
+      name: 成绩篡改（客户端提交分数）
+      severity: critical
+      target_point: score_tamper
+      role_context: [student]
+      method: POST
+      path: /api/exams/101/submit
+      body: { score: "100" }
+      payload: ""
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ["客户端提交"]
+      tags: [zh, education, busl-02]
+
+- category: edu_exam_time
+  owasp: "WSTG-BUSL-06 (业务逻辑)"
+  surface: api
+  samples:
+    - id: edu-004
+      name: 考试时间绕过（客户端延长）
+      severity: high
+      target_point: exam_time_bypass
+      role_context: [student]
+      method: POST
+      path: /api/exams/101/time
+      body: { minutes: "999" }
+      payload: ""
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ["考试时间已延长"]
+      tags: [zh, education, busl-06]

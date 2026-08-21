@@ -1,0 +1,36 @@
+# 场景样本库 · 会员/订阅/积分（订阅周期绕过/积分刷量）
+# 说明：靶场不含会员业务面，此类样本对靶场为阴性对照。
+
+- category: mem_subscription_bypass
+  owasp: "WSTG-BUSL-05/06 (业务逻辑)"
+  surface: api
+  samples:
+    - id: mem-001
+      name: 订阅周期绕过（试用重置/降级保留）
+      severity: high
+      target_point: subscription
+      role_context: [customer]
+      method: POST
+      path: /api/subscription/renew
+      body: { trial: "true" }
+      payload: ""
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ["试用已重置", "trial.*reset"]
+      tags: [zh, membership, busl-05]
+
+- category: mem_points_farm
+  owasp: "WSTG-BUSL-05 (业务逻辑)"
+  surface: api
+  samples:
+    - id: mem-002
+      name: 积分刷量（重复领取任务奖励）
+      severity: medium
+      target_point: points_farming
+      role_context: [customer]
+      method: POST
+      path: /api/points/task
+      body: { task_id: "t-1" }
+      payload: ""
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ["积分已发放"]
+      tags: [zh, membership, busl-05]

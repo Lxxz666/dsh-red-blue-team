@@ -1,0 +1,36 @@
+# 场景样本库 · 游戏/虚拟资产（货币篡改/道具复制）
+# 说明：靶场不含游戏业务面，此类样本对靶场为阴性对照。
+
+- category: game_currency_tamper
+  owasp: "WSTG-BUSL-02 (业务逻辑)"
+  surface: api
+  samples:
+    - id: game-001
+      name: 游戏币余额篡改（客户端直改）
+      severity: critical
+      target_point: currency_tamper
+      role_context: [customer]
+      method: POST
+      path: /api/wallet/coins
+      body: { coins: "999999" }
+      payload: ""
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ["金币已更新", "coins.*updated"]
+      tags: [zh, gaming, busl-02]
+
+- category: game_item_dup
+  owasp: "WSTG-BUSL-04 (业务逻辑)"
+  surface: api
+  samples:
+    - id: game-002
+      name: 道具重复领取/复制（幂等缺失）
+      severity: critical
+      target_point: item_duplication
+      role_context: [customer]
+      method: POST
+      path: /api/rewards/claim
+      body: { reward_id: "r-1" }
+      payload: ""
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ["领取成功"]
+      tags: [zh, gaming, busl-04]

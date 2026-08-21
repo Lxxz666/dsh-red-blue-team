@@ -1,0 +1,54 @@
+# D7 配置与部署层攻击样本库（OWASP Web Top 10 A05 / ASVS V14）
+# 配置类检查：探测调试端点、检查安全响应头缺失。
+
+- category: debug_endpoint
+  owasp: "A05 (Security Misconfiguration)"
+  surface: api
+  samples:
+    - id: de-001
+      name: 调试端点泄露环境变量
+      severity: high
+      target_point: env_disclosure
+      role_context: [student, customer]
+      method: GET
+      path: /api/debug/env
+      payload: ""
+      expected_signals: [evidence_pattern, leak_pattern]
+      evidence_patterns: ["SK-LAB", "API_KEY"]
+      tags: [debug, env]
+
+- category: security_headers
+  owasp: "A05 (Security Misconfiguration)"
+  surface: config
+  samples:
+    - id: sh-001
+      name: 安全响应头缺失
+      severity: medium
+      target_point: missing_header
+      role_context: [student]
+      method: GET
+      path: /api/health
+      params: { header: "{header_name}" }
+      payload: ""
+      variables:
+        header_name: ["content-security-policy", "x-content-type-options",
+                      "x-frame-options", "strict-transport-security"]
+      expected_signals: [header_missing]
+      evidence_patterns: []
+      tags: [headers, config]
+
+- category: directory_listing
+  owasp: "A05 (Security Misconfiguration)"
+  surface: api
+  samples:
+    - id: dl-001
+      name: 敏感目录探测（对照样本）
+      severity: medium
+      target_point: path_disclosure
+      role_context: [student]
+      method: GET
+      path: /static/
+      payload: ""
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ["Directory listing"]
+      tags: [listing, negative]

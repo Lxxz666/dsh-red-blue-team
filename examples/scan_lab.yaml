@@ -1,0 +1,55 @@
+# dsh-redteam 扫描配置示例（内置靶场）
+# 用法:
+#   1) 先起靶场:  dsh-redteam lab --port 8765 --guards ./lab_guards.yml
+#   2) 再扫描:    dsh-redteam scan --config examples/scan_lab.yaml
+#   3) 修复+回归: dsh-redteam fix --config examples/scan_lab.yaml --scan <scan_id>
+# 或一键演示:     dsh-redteam demo
+
+profile: full                 # full / quick / injection-only / web-only
+
+target:
+  name: demo-ecommerce-lab
+  type: lab                   # lab=内置靶场 / http=外部HTTP目标 / sdk=SDK直连
+  base_url: "http://127.0.0.1:8765"
+  guards_file: "./lab_guards.yml"   # 靶场防护配置（蓝队修复目标文件）
+  roles: [student, customer, admin] # 按角色×向量攻击矩阵
+  timeout_s: 15
+  admin_token: lab-admin-token
+  side_effect_token: scanner-side-effect-token
+
+# 对真实目标的合规声明（非本地目标必填，缺失将拒绝扫描）
+# authorization:
+#   authorized_by: "目标所有者/安全负责人"
+#   contact: "sec@example.com"
+#   scope: "仅限授权范围内的测试环境"
+
+vectors:
+  categories: [all]          # 或 [direct_injection, sqli, xss, ...]
+  variants_per_sample: 3     # 每个基础样本展开的变体数
+  seed: 42                   # 变体确定性种子（报告可复现审计）
+
+detector:
+  baseline: true             # 对话样本先发中性基线消息对比行为偏离
+  llm_judge: false           # LLM 弱信号裁判（需配置 DeepSeek 密钥；仅审存疑）
+  min_confidence: 0.6        # success 置信度下限（低于→存疑人工复核）
+
+blueteam:
+  enabled: true
+  sandbox_dir: "./sandbox"   # 修复沙箱（备份/版本化变更）
+  auto_apply: true           # 仅对 lab 目标生效；外部目标只出方案
+  rollback_on_fail: true     # 回归未清零自动回滚
+
+adaptive:
+  enabled: true              # wanter 攻击地形：学会"对这个目标最有效的攻击"
+  temperature: 0.5
+
+storage:
+  db_path: "./redteam.db"
+  audit_dir: "./audit"       # 事件溯源审计日志（每次攻击完整可回放）
+
+engine:
+  concurrency: 4             # 并发上限（副作用样本自动串行）
+  min_interval_ms: 20        # 请求节流（防把目标打挂）
+  max_errors: 20
+
+out_dir: "./reports"

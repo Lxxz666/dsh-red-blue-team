@@ -1,0 +1,109 @@
+# 场景样本库 · 电商/零售（结算/支付/优惠/订单状态/退款）
+# 说明：evidence_patterns 与 target_lab 电商业务 API 的成功响应严格对齐。
+
+- category: ecom_price_tamper
+  owasp: "WSTG-BUSL-02/10 (业务逻辑)"
+  surface: api
+  samples:
+    - id: ecom-001
+      name: 结算金额篡改（客户端传金额）
+      severity: critical
+      target_point: price_tamper
+      role_context: [customer]
+      method: POST
+      path: /api/checkout
+      body: { cart_id: "C-1001", amount: "{payload}" }
+      payload: "1"
+      variables:
+        payload: ["1", "0.01", "-100"]
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ["已按提交金额结算"]
+      tags: [zh, ecommerce, busl-02]
+
+- category: ecom_coupon_stack
+  owasp: "WSTG-BUSL-05 (业务逻辑)"
+  surface: api
+  samples:
+    - id: ecom-002
+      name: 优惠券叠加滥用
+      severity: high
+      target_point: coupon_stacking
+      role_context: [customer]
+      method: POST
+      path: /api/coupons/apply
+      body: { codes: ["FULL-50", "FULL-30", "FULL-20"] }
+      payload: ""
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ["优惠已叠加"]
+      tags: [zh, ecommerce, busl-05]
+
+- category: ecom_order_state
+  owasp: "WSTG-BUSL-06 (业务逻辑)"
+  surface: api
+  samples:
+    - id: ecom-003
+      name: 订单状态跳步（待发货→已完成）
+      severity: critical
+      target_point: state_machine
+      role_context: [customer]
+      method: POST
+      path: /api/orders/1002/status
+      body: { status: "已完成" }
+      payload: ""
+      stateful: true
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ["订单状态已更新"]
+      tags: [zh, ecommerce, busl-06]
+
+- category: ecom_pay_callback
+  owasp: "WSTG-BUSL-03/10 (业务逻辑)"
+  surface: api
+  samples:
+    - id: ecom-004
+      name: 支付回调伪造
+      severity: critical
+      target_point: forged_callback
+      role_context: [customer]
+      method: POST
+      path: /api/pay/callback
+      body: { order_id: "1001", status: "success", signature: "forged" }
+      payload: ""
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ["回调已处理"]
+      tags: [zh, ecommerce, busl-10]
+
+- category: ecom_dup_refund
+  owasp: "WSTG-BUSL-04/10 (业务逻辑)"
+  surface: api
+  samples:
+    - id: ecom-005
+      name: 重复退款（幂等缺失）
+      severity: critical
+      target_point: refund_idempotency
+      role_context: [customer]
+      method: POST
+      path: /api/orders/1001/refund
+      body: { amount: "299" }
+      payload: ""
+      repeat: 2
+      stateful: true
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ["再次退款已受理"]
+      tags: [zh, ecommerce, busl-10]
+
+- category: ecom_inventory_race
+  owasp: "WSTG-BUSL-04 (业务逻辑)"
+  surface: api
+  samples:
+    - id: ecom-006
+      name: 并发下单超卖探测（对照样本）
+      severity: high
+      target_point: inventory_race
+      role_context: [customer]
+      method: POST
+      path: /api/orders
+      body: { item_id: "SKU-001", qty: "9999" }
+      payload: ""
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ["库存不足"]
+      tags: [zh, ecommerce, race, negative]

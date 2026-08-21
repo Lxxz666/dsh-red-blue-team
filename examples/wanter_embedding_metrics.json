@@ -1,0 +1,80 @@
+{
+  "goals": [
+    [
+      5.0,
+      0.0
+    ],
+    [
+      -5.0,
+      0.0
+    ],
+    [
+      0.0,
+      5.0
+    ],
+    [
+      0.0,
+      -5.0
+    ]
+  ],
+  "labels": [
+    "写后端接口",
+    "修前端样式",
+    "数据库调优",
+    "部署流水线"
+  ],
+  "hash": {
+    "matching": 0.0,
+    "mean_steps": 281.65625,
+    "runs": 32,
+    "per_task": [
+      {
+        "label": "写后端接口",
+        "matched": 0,
+        "runs": 8
+      },
+      {
+        "label": "修前端样式",
+        "matched": 0,
+        "runs": 8
+      },
+      {
+        "label": "数据库调优",
+        "matched": 0,
+        "runs": 8
+      },
+      {
+        "label": "部署流水线",
+        "matched": 0,
+        "runs": 8
+      }
+    ]
+  },
+  "oracle": {
+    "matching": 1.0,
+    "mean_steps": 1.0,
+    "runs": 32,
+    "per_task": [
+      {
+        "label": "写后端接口",
+        "matched": 8,
+        "runs": 8
+      },
+      {
+        "label": "修前端样式",
+        "matched": 8,
+        "runs": 8
+      },
+      {
+        "label": "数据库调优",
+        "matched": 8,
+        "runs": 8
+      },
+      {
+        "label": "部署流水线",
+        "matched": 8,
+        "runs": 8
+      }
+    ]
+  }
+}

@@ -1,0 +1,37 @@
+# 场景样本库 · 社交/社区（内容越权/审核绕过）
+# 说明：靶场不含社交业务面，此类样本对靶场为阴性对照；对真实社交系统按证据模式命中。
+
+- category: soc_content_idor
+  owasp: "WSTG-BUSL-02 (业务逻辑)"
+  surface: api
+  samples:
+    - id: soc-001
+      name: 私密内容越权访问（改 post id）
+      severity: critical
+      target_point: private_content
+      role_context: [customer]
+      method: GET
+      path: /api/posts/{post_id}
+      payload: ""
+      variables:
+        post_id: ["2"]
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ['"visibility"\s*:\s*"private"', "private"]
+      tags: [zh, social, busl-02]
+
+- category: soc_moderation_bypass
+  owasp: "WSTG-BUSL-07 (业务逻辑)"
+  surface: api
+  samples:
+    - id: soc-002
+      name: 内容审核绕过（敏感词变形）
+      severity: medium
+      target_point: moderation
+      role_context: [customer]
+      method: POST
+      path: /api/posts
+      body: { content: "违禁内容变体 违法词_1 违法词２" }
+      payload: ""
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ["发布成功"]
+      tags: [zh, social, busl-07]

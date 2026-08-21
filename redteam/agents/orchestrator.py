@@ -1,0 +1,314 @@
+"""redteam.agents.orchestrator —— 主 Agent（AttackOrchestrator）。
+
+职责（主 Agent 视角）：
+1. 派发侦察子 Agent → 获得目标能力与业务场景指纹；
+2. 制定攻击计划（检测面 × 角色 × 场景样本）；
+3. 并行派发攻击子 Agent（按角色分组，每个子 Agent 独立 scoped ctx）；
+4. 派发静态子 Agent（文件夹模式）；
+5. 汇总全部 WorkerReport → 落库 → 生成攻击报告；
+6. （可选）调用 LLM 生成攻击态势综述（非 mock provider 时）。
+
+审计：全程经 dsh EventBus 发射事件（scan/started → agent/dispatched →
+agent/report → finding/detected → scan/finished），AuditSink 落盘 JSONL。
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+from typing import Any, Dict, List, Optional, Sequence
+
+from ..config import ScanConfig
+from ..models import (ConcreteSample, ScanResult, TargetResponse, Verdict,
+                      VerdictResult, new_id, now_iso)
+from ..runtime import RedTeamRuntime
+from ..scenarios import (detect_scenario_endpoints, detect_scenario_folder,
+                         sample_categories_for, scenario_names)
+from .worker import (AttackWorkerAgent, ReconAgent, StaticAgent, WorkerReport)
+
+log = logging.getLogger("redteam.agents.orchestrator")
+
+#: 对话攻击的中性基线消息（行为偏离判定参照）
+BASELINE_MESSAGE = "你好，请介绍一下你自己。"
+
+
+class AttackOrchestrator:
+    """主 Agent：攻击计划 → 并行子代理 → 汇总 → 攻击报告。"""
+
+    def __init__(self, runtime: RedTeamRuntime, cfg: ScanConfig,
+                 adapter: Optional[Any] = None, scan_mode: str = "full",
+                 order: str = "adaptive") -> None:
+        self.runtime = runtime
+        self.cfg = cfg
+        self.adapter = adapter
+        self.scan_mode = scan_mode
+        self.order = order
+        self.scan_id = new_id("scan")
+        self.scenarios: List[str] = []
+
+    # ---- 主流程 ----
+
+    async def run(self) -> ScanResult:
+        cfg, rt = self.cfg, self.runtime
+        ctx = rt.ctx
+        result = ScanResult(scan_id=self.scan_id, target=cfg.target.name,
+                            started_at=now_iso())
+        audit_path = rt.audit.open_scan(self.scan_id)
+        result.audit_path = audit_path
+        ctx.emit("scan/started", {"scan_id": self.scan_id,
+                                  "target": cfg.target.name,
+                                  "mode": self.scan_mode,
+                                  "agent_mode": True,
+                                  "input": (cfg.target.folder_path
+                                            or cfg.target.base_url),
+                                  "config": cfg.source_path or "(内置)"})
+        rt.storage.new_scan(self.scan_id, cfg.target.name, cfg.profile,
+                            self.scan_mode, result.started_at)
+        try:
+            probe: Dict[str, Any] = {}
+            worker_reports: List[WorkerReport] = []
+
+            # ① 侦察子代理（网址/靶场模式）
+            if self.adapter is not None:
+                recon = ReconAgent(rt, cfg, self.adapter)
+                ctx.emit("agent/dispatched", {"agent": "recon",
+                                              "task": "目标侦察"})
+                recon_report = await recon.run()
+                worker_reports.append(recon_report)
+                probe = recon_report.extra.get("probe") or {}
+                await self.adapter.reset()
+                # 场景识别
+                self._detect_scenarios(probe, recon_report)
+
+            # ② 静态子代理（文件夹模式）
+            static_findings: List[Any] = []
+            if cfg.target.type == "folder":
+                self._detect_scenarios({}, None, folder=cfg.target.folder_path)
+                static_agent = StaticAgent(rt, cfg)
+                ctx.emit("agent/dispatched", {"agent": "static",
+                                              "task": "静态代码审计"})
+                static_report = await static_agent.run(cfg.target.folder_path)
+                worker_reports.append(static_report)
+                from ..static.scanner import StaticFinding
+                static_findings = [StaticFinding(**item) for item in
+                                   static_report.extra.get("static_findings") or []]
+
+            # ③ 攻击计划：检测面 × 角色 × 场景样本
+            samples: List[ConcreteSample] = []
+            if self.adapter is not None:
+                samples = self._plan_samples(probe)
+            ctx.emit("agent/dispatched", {"agent": "plan",
+                                          "task": "攻击计划",
+                                          "samples": len(samples),
+                                          "scenarios": self.scenarios})
+
+            # ④ 并行派发攻击子代理（按角色分组）
+            verdicts: List[VerdictResult] = []
+            if samples:
+                verdicts = await self._dispatch_attack_workers(samples)
+            result.verdicts = verdicts
+
+            # ⑤ 汇总：漏洞落库（动态 + 静态）
+            seq = 0
+            for verdict in verdicts:
+                if verdict.success:
+                    seq += 1
+                    sample = self._sample_of(verdict.sample_uid, samples)
+                    if sample is None:
+                        continue
+                    finding = self._finding_from(verdict, sample, seq)
+                    result.findings.append(finding)
+                    rt.storage.add_finding(finding)
+                    ctx.emit("finding/detected", finding)
+            from ..static.scanner import findings_to_model
+            for finding in findings_to_model(static_findings, self.scan_id):
+                result.findings.append(finding)
+                rt.storage.add_finding(finding)
+                ctx.emit("finding/detected", finding)
+
+            # ⑥ 攻击报告（报告器 + 可选 LLM 综述）
+            from ..reporter.report import write_report
+            narrative = await self._narrative(result)
+            report_path, json_path = write_report(
+                result, cfg.out_dir, probe=probe,
+                base_url=cfg.target.base_url, mode=self.scan_mode,
+                audit_path=audit_path, scenarios=self.scenarios,
+                narrative=narrative)
+            result.report_path = report_path
+            result.report_json_path = json_path
+            result.probe = probe
+            result.finished_at = now_iso()
+            result.status = "finished"
+
+            # ⑦ 自适应地形持久化 + 收尾
+            if cfg.adaptive.enabled and samples:
+                rt.terrain.save()
+            rt.storage.finish_scan(
+                self.scan_id, result.finished_at, result.total,
+                result.success_count, result.suspicious_count,
+                report_path, json_path, audit_path, probe)
+            ctx.emit("scan/finished", {
+                "scan_id": self.scan_id, "total": result.total,
+                "success": result.success_count,
+                "suspicious": result.suspicious_count,
+                "findings": len(result.findings),
+                "scenarios": self.scenarios,
+                "agents": [r.agent_id for r in worker_reports],
+                "report": report_path, "audit": audit_path})
+            return result
+        except Exception as exc:
+            rt.storage.fail_scan(self.scan_id, str(exc))
+            ctx.emit("scan/failed", str(exc))
+            log.exception("主 Agent 扫描 %s 失败", self.scan_id)
+            raise
+
+    # ---- 计划与派发 ----
+
+    def _detect_scenarios(self, probe: Dict[str, Any],
+                          recon_report: Optional[WorkerReport] = None,
+                          folder: str = "") -> None:
+        cfg = self.cfg
+        if cfg.target.scenario and cfg.target.scenario != "auto":
+            self.scenarios = [s.strip() for s in
+                              cfg.target.scenario.split(",") if s.strip()]
+            return
+        detected: List[str] = []
+        if probe.get("scenarios"):
+            detected = [str(s) for s in probe["scenarios"]]
+        elif recon_report is not None and recon_report.extra.get("endpoints"):
+            endpoint_hit = detect_scenario_endpoints(
+                set(recon_report.extra["endpoints"]))
+            if endpoint_hit:
+                detected = [endpoint_hit]
+        elif folder:
+            from ..scenarios import detect_scenario_folder
+            hit = detect_scenario_folder(folder)
+            if hit:
+                detected = [hit]
+        self.scenarios = detected
+        if detected:
+            names = ", ".join(scenario_names().get(s, s) for s in detected)
+            log.info("业务场景识别：%s", names)
+
+    def _plan_samples(self, probe: Dict[str, Any]) -> List[ConcreteSample]:
+        cfg, rt = self.cfg, self.runtime
+        categories = list(cfg.vectors.categories)
+        categories += sample_categories_for(self.scenarios)
+        samples = rt.registry.samples_for(
+            cfg.vectors.roles, categories, cfg.vectors.variants_per_sample)
+        if cfg.engine.samples_limit:
+            samples = samples[:cfg.engine.samples_limit]
+        if self.order == "adaptive" and cfg.adaptive.enabled:
+            samples = rt.terrain.priority(samples, rt.terrain.seen_uids())
+        elif self.order == "random":
+            import random
+            random.Random(cfg.vectors.seed).shuffle(samples)
+        log.info("攻击计划：%d 条样本（角色 %s × 场景 %s）",
+                 len(samples), cfg.vectors.roles, self.scenarios or ["通用"])
+        return samples
+
+    async def _dispatch_attack_workers(self, samples: List[ConcreteSample]
+                                       ) -> List[VerdictResult]:
+        cfg, rt, ctx = self.cfg, self.runtime, self.runtime.ctx
+        # 共享并发/串行通道（跨子代理）
+        semaphore = asyncio.Semaphore(cfg.engine.concurrency)
+        side_lock = asyncio.Lock()
+        # 按角色分组：每个角色一个攻击子代理
+        groups: Dict[str, List[ConcreteSample]] = {}
+        for sample in samples:
+            groups.setdefault(sample.role, []).append(sample)
+        workers: List[AttackWorkerAgent] = []
+        for role in cfg.vectors.roles:
+            if role in groups:
+                workers.append(AttackWorkerAgent(
+                    agent_id=f"attacker-{role}", label=f"攻击子代理[{role}]",
+                    runtime=rt, cfg=cfg, adapter=self.adapter,
+                    semaphore=semaphore, side_lock=side_lock,
+                    scan_id=self.scan_id))
+        for worker in workers:
+            ctx.emit("agent/dispatched", {
+                "agent": worker.agent_id, "label": worker.label,
+                "task": f"执行 {len(groups[worker.agent_id.split('-')[-1]])} 条攻击样本"})
+        # 并行派发
+        reports = await asyncio.gather(*[
+            worker.run(groups[worker.agent_id.split("-")[-1]])
+            for worker in workers])
+        verdicts: List[VerdictResult] = []
+        for report in reports:
+            verdicts.extend(report.verdicts)
+        return verdicts
+
+    # ---- 汇总 ----
+
+    @staticmethod
+    def _sample_of(uid: str, samples: Sequence[ConcreteSample]
+                   ) -> Optional[ConcreteSample]:
+        for sample in samples:
+            if sample.uid == uid:
+                return sample
+        return None
+
+    def _finding_from(self, verdict: VerdictResult, sample: ConcreteSample,
+                      seq: int):
+        from ..blueteam.templates import fix_template_for
+        from ..models import Finding
+        template = fix_template_for(sample.category)
+        return Finding(
+            finding_id=f"F-{seq:03d}",
+            scan_id=self.scan_id,
+            category=sample.category,
+            owasp=sample.sample.owasp,
+            severity=sample.sample.severity,
+            sample_id=sample.sample.id,
+            sample_uid=sample.uid,
+            payload=sample.payload,
+            role=sample.role,
+            chain=verdict.chain,
+            evidence=verdict.evidence,
+            signals={s.name: {"hit": s.hit, "evidence": s.evidence}
+                     for s in verdict.signals if s.hit},
+            confidence=verdict.confidence,
+            fix={"auto_fixable": bool(template and template.auto_fixable),
+                 "template": template.template_id if template else "",
+                 "plan": template.title if template else "需人工研判",
+                 "status": "pending"})
+
+    async def _narrative(self, result: ScanResult) -> str:
+        """主 Agent 的攻击态势综述（LLM 可用时生成；否则确定性模板）。"""
+        if result.success_count == 0:
+            return ("本轮攻击未发现确认漏洞：目标对各攻击向量均表现出有效防御。"
+                    "存疑样本请在审计日志中人工复核。")
+        categories = sorted({f.category for f in result.findings})
+        severity_counts = result.severity_counts()
+        scenario_text = "、".join(self.scenarios) or "通用"
+        text = (
+            f"主 Agent 攻击态势综述：本轮共执行 {result.total} 条攻击样本，"
+            f"确认 {result.success_count} 次攻击成功，发现 "
+            f"{len(result.findings)} 条漏洞（严重 "
+            f"{severity_counts.get('critical', 0)} / 高危 "
+            f"{severity_counts.get('high', 0)} / 中危 "
+            f"{severity_counts.get('medium', 0)} / 低危 "
+            f"{severity_counts.get('low', 0)}）。")
+        text += f" 业务场景：{scenario_text}。"
+        text += (" 命中漏洞类别：" + "、".join(categories[:8]) +
+                 ("…" if len(categories) > 8 else "") + "。")
+        llm = self.runtime.llm
+        if not llm or "deepseek" not in llm.providers():
+            return text
+        try:
+            from dsh.llm.adapters import LlmCallConfig, LlmRequest
+            from dsh.llm.messages import Message
+            prompt = (f"你是红队安全分析师。基于以下扫描摘要，用 100 字以内的中文"
+                      f"写一段管理层可读的攻击态势综述：\n{text}")
+            request = LlmRequest(
+                config=LlmCallConfig(provider="deepseek", model="deepseek-chat",
+                                     max_tokens=200),
+                messages=[Message("user", prompt)])
+            out = ""
+            async for chunk in llm.stream(request):
+                if getattr(chunk, "text", ""):
+                    out += chunk.text
+            if out.strip():
+                return f"{text}\n\n[LLM 态势综述] {out.strip()}"
+        except Exception as exc:
+            log.warning("LLM 综述生成失败，使用确定性模板: %s", exc)
+        return text
