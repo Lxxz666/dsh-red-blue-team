@@ -330,9 +330,16 @@ async def cmd_report(args: argparse.Namespace) -> None:
             return
         result = await _load_scan_result(runtime, runtime.storage, args.scan)
         from .reporter import write_report
+        # 目标显示：文件夹目标显示路径；场景从侦察快照恢复
+        if cfg.target.type == "folder":
+            base_url = cfg.target.folder_path
+        else:
+            base_url = cfg.target.base_url
+        scenarios = (result.probe or {}).get("scenarios") or []
         md_path, json_path = write_report(
             result, cfg.out_dir, probe=result.probe,
-            base_url=cfg.target.base_url, audit_path=result.audit_path)
+            base_url=base_url, audit_path=result.audit_path,
+            scenarios=scenarios)
         print(f"报告已生成: {md_path}\nJSON: {json_path}")
         if args.json:
             print(json.dumps(json.load(open(json_path, encoding="utf-8")),
@@ -357,6 +364,10 @@ async def cmd_bench(args: argparse.Namespace) -> None:
         guards_file = os.path.join(tmp, "guards.yml")
         build_default_guards_file(guards_file)
         cfg.target.guards_file = guards_file
+        # 产物目录隔离：bench 的数据库/审计/报告全部落临时目录，不污染工作区
+        cfg.storage.db_path = os.path.join(tmp, "bench.db")
+        cfg.storage.audit_dir = os.path.join(tmp, "audit")
+        cfg.out_dir = os.path.join(tmp, "reports")
         lab = start_lab(guards_file=guards_file, port=0)
         cfg.target.base_url = lab.base_url
         try:

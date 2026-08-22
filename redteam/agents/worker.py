@@ -12,7 +12,8 @@ from typing import Any, Dict, List, Optional
 
 from ..config import ScanConfig
 from ..engine.scan import execute_sample
-from ..models import ConcreteSample, VerdictResult
+from ..errors import UnsupportedSurface
+from ..models import ConcreteSample, TargetResponse, Verdict, VerdictResult
 from ..runtime import RedTeamRuntime
 
 log = logging.getLogger("redteam.agents")
@@ -82,14 +83,24 @@ class AttackWorkerAgent:
 
     async def _attack_one(self, sample: ConcreteSample) -> VerdictResult:
         # 状态型样本：串行通道 + 状态重置（防污染），副作用期望样本另做前后快照
-        if sample.sample.stateful or "side_effect" in sample.sample.expected_signals:
-            async with self.side_lock:
-                verdict, response = await execute_sample(
-                    self.runtime, self.cfg, self.adapter, sample, reset=True)
-        else:
-            async with self.semaphore:                      # 并发上限
-                verdict, response = await execute_sample(
-                    self.runtime, self.cfg, self.adapter, sample)
+        try:
+            if sample.sample.stateful or "side_effect" in sample.sample.expected_signals:
+                async with self.side_lock:
+                    verdict, response = await execute_sample(
+                        self.runtime, self.cfg, self.adapter, sample, reset=True)
+            else:
+                async with self.semaphore:                      # 并发上限
+                    verdict, response = await execute_sample(
+                        self.runtime, self.cfg, self.adapter, sample)
+        except UnsupportedSurface as exc:
+            # 样本不适配目标（如对话样本 → MCP 目标）：跳过而非报错
+            from ..models import now_iso
+            verdict = VerdictResult(
+                sample_uid=sample.uid, category=sample.category,
+                role=sample.role, verdict=Verdict.SKIPPED.value,
+                confidence=1.0, evidence=f"样本不适配目标: {exc}",
+                created_at=now_iso())
+            response = TargetResponse(status=0, text="(skipped)")
         self.runtime.ctx.emit("attack/executed", {
             "agent": self.agent_id, "sample": sample.describe(),
             "status": response.status,

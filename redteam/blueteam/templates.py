@@ -722,3 +722,6 @@ def fix_template_for(category: str) -> Optional[FixTemplate]:
 
 # 业务场景修复模板（D19）：在导入 templates 时一并注册
 from . import scenario_templates  # noqa: E402,F401  (注册 EXTRA_TEMPLATES)
+
+# MCP 目标修复模板（工具面加固指引）：一并注册
+from . import mcp_templates  # noqa: E402,F401

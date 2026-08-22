@@ -11,12 +11,13 @@ pip install -e .                       # 可选：安装 dsh-redteam / dsh-pytho
 无需 API Key 即可运行：判定器是确定性的，内置靶场不依赖真实 LLM。
 配置 `DEEPSEEK_API_KEY` 后自动启用 DeepSeek 适配器（LLM 弱信号裁判/攻击态势综述）。
 
-## 2. 两种输入模式
+## 2. 三种目标输入
 
 | 模式 | 命令 | 适用 |
 |:--|:--|:--|
 | **网址动态扫描** | `dsh-redteam scan --config scan.yml` | 已部署的业务系统（HTTP API / 对话 agent） |
 | **文件夹静态扫描** | `dsh-redteam static <文件夹>` 或 `scan` + `type: folder` | 本地项目源码（代码级审计，免授权声明） |
+| **MCP 服务工具面攻击** | `scan` + `type: mcp`（`examples/scan_mcp.yaml`） | 暴露 stdio MCP 工具的 agent 系统 |
 
 ## 3. 命令一览
 
@@ -29,7 +30,7 @@ pip install -e .                       # 可选：安装 dsh-redteam / dsh-pytho
 | `dsh-redteam lab [--port 8765] [--guards FILE]` | 启动内置靶场（37 个埋入漏洞） |
 | `dsh-redteam report --config scan.yml [--list｜--scan ID]` | 历史扫描/重建报告 |
 | `dsh-redteam bench --config scan.yml` | 自适应优先级基准（随机基线 vs wanter 地形序） |
-| `dsh-redteam samples [list｜show CATEGORY]` | 攻击样本库（51 类别） |
+| `dsh-redteam samples [list｜show CATEGORY]` | 攻击样本库（54 类别） |
 | `dsh-redteam scenarios [list｜show ID]` | 业务场景库（12 场景指纹与攻击点） |
 
 ## 4. 最小上手（3 条命令）
@@ -70,6 +71,33 @@ target:
   folder_path: "./my-project"
   scenario: auto             # 按文件路径指纹识别业务场景
 ```
+
+### MCP 模式要点
+
+```yaml
+target:
+  type: mcp                        # stdio MCP 服务器（复用 dsh.mcp 客户端）
+  mcp_command: ["python", "your_mcp_server.py"]   # 启动命令 argv
+vectors:
+  categories: [mcp_tool_abuse, mcp_data_disclosure, mcp_memory_poisoning]
+  llm_variants: false              # LLM 载荷变体（需 DEEPSEEK_API_KEY，opt-in）
+```
+
+攻击样本约定：`path=工具名、body=工具参数`，扫描器向目标工具注入恶意参数并以
+工具返回文本为判定证据；对话型样本对 MCP 目标自动跳过（skipped，不误报 error）。
+MCP 目标为外部进程，蓝队只输出人工实施修复报告（含代码级 before/after 示例）。
+
+### LLM 变体增强（opt-in）
+
+```yaml
+vectors:
+  llm_variants: true               # 默认 false（离线确定性不受影响）
+  llm_variants_per_sample: 2       # 每个基础样本的变体数上限
+```
+
+开启后（且配置了 `DEEPSEEK_API_KEY`），主 Agent 的攻击计划会为对话型基础样本
+生成语义等价、措辞不同的攻击载荷变体；LLM 失败/离线时静默降级为静态变体，
+验收指标（发现率/零误报）不依赖 LLM。
 
 ### 对接真实 HTTP 目标协议约定
 

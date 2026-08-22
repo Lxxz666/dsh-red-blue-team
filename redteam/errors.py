@@ -22,6 +22,10 @@ class TargetUnavailable(AdapterError):
     """目标不可达。"""
 
 
+class UnsupportedSurface(AdapterError):
+    """样本类型与目标适配器不匹配（如对话样本发往 MCP 目标）→ 该样本跳过。"""
+
+
 class SampleError(RedTeamError):
     """样本库加载/展开失败。"""
 

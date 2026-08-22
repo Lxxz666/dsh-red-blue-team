@@ -1,0 +1,44 @@
+# MCP 目标扫描配置示例（stdio MCP 服务器工具面）
+# 用法:
+#   1) 启动你的 MCP 服务器（stdio JSON-RPC）——攻击样本直接注入工具参数
+#   2) dsh-redteam scan --config examples/scan_mcp.yaml
+# 说明: path=工具名、body=工具参数；对话型样本对 MCP 目标自动跳过。
+
+profile: quick
+
+target:
+  name: my-agent-mcp-server
+  type: mcp                        # MCP 目标（stdio，复用 dsh.mcp 客户端）
+  mcp_command: ["python", "your_mcp_server.py"]   # 服务器启动命令（argv）
+  scenario: auto
+  roles: [student, customer, admin]
+  timeout_s: 60
+
+vectors:
+  categories: [mcp_tool_abuse, mcp_data_disclosure, mcp_memory_poisoning]
+  variants_per_sample: 1
+  seed: 42
+  llm_variants: false             # LLM 变体生成（需 DEEPSEEK_API_KEY，opt-in）
+  llm_variants_per_sample: 2
+
+detector:
+  baseline: false                 # MCP 无对话基线
+  llm_judge: false
+
+blueteam:
+  enabled: true                   # MCP 目标输出人工实施修复报告（含代码级示例）
+  sandbox_dir: "./sandbox"
+  auto_apply: false               # 外部目标不自动修改
+
+adaptive:
+  enabled: true
+
+storage:
+  db_path: "./redteam.db"
+  audit_dir: "./audit"
+
+engine:
+  concurrency: 2                  # MCP 单进程服务器：低并发稳妥
+  agent_mode: true
+
+out_dir: "./reports"

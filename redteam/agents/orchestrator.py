@@ -95,7 +95,7 @@ class AttackOrchestrator:
             # ③ 攻击计划：检测面 × 角色 × 场景样本
             samples: List[ConcreteSample] = []
             if self.adapter is not None:
-                samples = self._plan_samples(probe)
+                samples = await self._plan_samples(probe)
             ctx.emit("agent/dispatched", {"agent": "plan",
                                           "task": "攻击计划",
                                           "samples": len(samples),
@@ -189,12 +189,15 @@ class AttackOrchestrator:
             names = ", ".join(scenario_names().get(s, s) for s in detected)
             log.info("业务场景识别：%s", names)
 
-    def _plan_samples(self, probe: Dict[str, Any]) -> List[ConcreteSample]:
+    async def _plan_samples(self, probe: Dict[str, Any]) -> List[ConcreteSample]:
         cfg, rt = self.cfg, self.runtime
         categories = list(cfg.vectors.categories)
         categories += sample_categories_for(self.scenarios)
         samples = rt.registry.samples_for(
             cfg.vectors.roles, categories, cfg.vectors.variants_per_sample)
+        # LLM 变体生成（opt-in：DeepSeek 可用时增强攻击计划，失败静默降级）
+        if cfg.vectors.llm_variants and cfg.vectors.llm_variants_per_sample > 0:
+            samples = await self._append_llm_variants(samples, categories)
         if cfg.engine.samples_limit:
             samples = samples[:cfg.engine.samples_limit]
         if self.order == "adaptive" and cfg.adaptive.enabled:
@@ -205,6 +208,41 @@ class AttackOrchestrator:
         log.info("攻击计划：%d 条样本（角色 %s × 场景 %s）",
                  len(samples), cfg.vectors.roles, self.scenarios or ["通用"])
         return samples
+
+    async def _append_llm_variants(self, samples: List[ConcreteSample],
+                                   categories: List[str]) -> List[ConcreteSample]:
+        """为选中类别的基础样本生成 LLM 变体（每个样本最多 n 条）。"""
+        cfg, rt = self.cfg, self.runtime
+        wanted = set(categories)
+        llm_count = 0
+        additions: List[ConcreteSample] = []
+        for base in rt.registry.samples:
+            if "all" not in wanted and base.category not in wanted:
+                continue
+            if base.surface != "chat":      # 只对对话载荷做语义变体
+                continue
+            try:
+                variants = await rt.registry.generate_llm_variants(
+                    base, n=cfg.vectors.llm_variants_per_sample)
+            except Exception as exc:
+                log.debug("LLM 变体生成异常（跳过）: %s", exc)
+                variants = []
+            if not variants:
+                continue
+            roles = [r for r in (base.role_context or list(cfg.vectors.roles))
+                     if r in cfg.vectors.roles]
+            for role in roles:
+                for index, payload in enumerate(variants):
+                    additions.append(ConcreteSample(
+                        uid=f"{base.id}-{role}-llm{index}",
+                        sample=base, role=role, payload=payload,
+                        params={}, body={}, path="",
+                        variant_index=100 + index, variant_of="llm"))
+                    llm_count += 1
+        if llm_count:
+            log.info("LLM 变体生成：新增 %d 条攻击载荷变体", llm_count)
+        additions.sort(key=lambda s: (s.category, s.sample.id, s.uid))
+        return list(samples) + additions
 
     async def _dispatch_attack_workers(self, samples: List[ConcreteSample]
                                        ) -> List[VerdictResult]:

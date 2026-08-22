@@ -9,6 +9,6 @@
 """
 from ._compat import ensure_dsh
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 ensure_dsh()

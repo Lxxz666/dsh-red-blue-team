@@ -70,7 +70,7 @@ class Authorization:
 @dataclass
 class TargetConfig:
     name: str = "target"
-    type: str = "lab"                  # lab | http | sdk | folder
+    type: str = "lab"                  # lab | http | sdk | folder | mcp
     base_url: str = "http://127.0.0.1:8765"
     headers: Dict[str, str] = field(default_factory=dict)
     admin_token: str = "lab-admin-token"
@@ -82,6 +82,7 @@ class TargetConfig:
     guards_file: str = ""              # 靶场防护配置文件（蓝队修复目标）
     folder_path: str = ""              # 本地项目文件夹（type=folder 静态扫描）
     scenario: str = "auto"             # 业务场景：auto / ecommerce,education,...
+    mcp_command: List[str] = field(default_factory=list)  # MCP 服务器启动命令（argv）
 
     @property
     def is_local(self) -> bool:
@@ -96,6 +97,8 @@ class VectorsConfig:
     variants_per_sample: int = 2
     seed: int = 42
     bank_dir: str = ""                 # 空 = 包内 sample_bank
+    llm_variants: bool = False         # LLM 变体生成（需 DeepSeek 密钥；mock 自动降级）
+    llm_variants_per_sample: int = 2   # 每个基础样本的 LLM 变体数上限
 
 
 @dataclass
@@ -195,6 +198,7 @@ class ScanConfig:
             guards_file=str(target.get("guards_file", "")),
             folder_path=str(target.get("folder_path", "")),
             scenario=str(target.get("scenario", "auto")),
+            mcp_command=[str(c) for c in target.get("mcp_command") or []],
         )
         vectors = raw.get("vectors") or {}
         cfg.vectors = VectorsConfig(
@@ -204,6 +208,9 @@ class ScanConfig:
                 "variants_per_sample", preset.get("variants_per_sample", 2))),
             seed=int(vectors.get("seed", 42)),
             bank_dir=str(vectors.get("bank_dir", "")),
+            llm_variants=bool(vectors.get("llm_variants", False)),
+            llm_variants_per_sample=max(0, int(vectors.get(
+                "llm_variants_per_sample", 2))),
         )
         detector = raw.get("detector") or {}
         cfg.detector = DetectorConfig(
@@ -242,7 +249,7 @@ class ScanConfig:
         return cfg
 
     def validate(self) -> None:
-        if self.target.type not in ("lab", "http", "sdk", "folder"):
+        if self.target.type not in ("lab", "http", "sdk", "folder", "mcp"):
             raise ConfigError(f"未知目标类型: {self.target.type!r}")
         if self.target.type == "folder":
             if not self.target.folder_path:
@@ -251,6 +258,11 @@ class ScanConfig:
                 raise ConfigError(
                     f"文件夹不存在: {self.target.folder_path}")
             return  # 本地代码静态审计：无需授权声明
+        if self.target.type == "mcp":
+            if not self.target.mcp_command:
+                raise ConfigError(
+                    "mcp 目标必须指定 target.mcp_command（MCP 服务器启动命令 argv）")
+            return  # MCP 服务器为本地进程（stdio），同 lab 免授权声明
         if not self.target.base_url.startswith(("http://", "https://")):
             raise ConfigError(f"base_url 必须是 http(s):// 形式: {self.target.base_url!r}")
         if self.vectors.variants_per_sample < 0:

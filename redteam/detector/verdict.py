@@ -128,7 +128,7 @@ class VerdictEngine(Service):
             request = LlmRequest(
                 config=LlmCallConfig(provider="deepseek", model="deepseek-chat",
                                      max_tokens=8),
-                messages=[Message("user", prompt)])
+                messages=[Message.user(prompt)])
             text = ""
             async for chunk in llm.stream(request):
                 if getattr(chunk, "text", ""):

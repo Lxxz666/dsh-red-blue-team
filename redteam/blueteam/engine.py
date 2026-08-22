@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional, Sequence
 import yaml
 
 from ..config import ScanConfig
-from ..errors import FixError, RegressionError
+from ..errors import FixError, RegressionError, UnsupportedSurface
 from ..models import (Finding, FixPlan, FixResult, RegressionResult,
                       ScanResult, Verdict, new_id, now_iso)
 from ..runtime import RedTeamRuntime
@@ -167,7 +167,8 @@ class BlueEngine:
         sandbox_dir = os.path.abspath(self.cfg.blueteam.sandbox_dir)
         os.makedirs(sandbox_dir, exist_ok=True)
         stamp = time.strftime("%Y%m%d%H%M%S")
-        backup = os.path.join(sandbox_dir, f"guards-{stamp}-{plan.fix_id if hasattr(plan, 'fix_id') else plan.plan_id}.bak")
+        # 版本化备份：文件名 = 时间戳 + 方案 id（可追溯、可回滚）
+        backup = os.path.join(sandbox_dir, f"guards-{stamp}-{plan.plan_id}.bak")
 
         try:
             with open(guards_file, "r", encoding="utf-8") as fh:
@@ -243,8 +244,12 @@ class BlueEngine:
                 after.append({"uid": row["sample_uid"],
                               "verdict": "skipped(无法重建样本)"})
                 continue
-            verdict, _response = await execute_sample(
-                self.runtime, self.cfg, self.adapter, concrete, reset=True)
+            try:
+                verdict, _response = await execute_sample(
+                    self.runtime, self.cfg, self.adapter, concrete, reset=True)
+            except UnsupportedSurface:
+                after.append({"uid": row["sample_uid"], "verdict": "skipped"})
+                continue
             after.append({"uid": row["sample_uid"],
                           "verdict": verdict.verdict,
                           "evidence": verdict.evidence[:200]})

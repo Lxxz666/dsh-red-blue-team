@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from ..adapters import HttpAdapter, SdkAdapter, TargetAdapter
 from ..config import ScanConfig
-from ..errors import ConfigError
+from ..errors import ConfigError, UnsupportedSurface
 from ..models import (ConcreteSample, Finding, TargetResponse, Verdict,
                       VerdictResult, now_iso)
 from ..runtime import RedTeamRuntime
@@ -27,11 +27,17 @@ def build_adapter(cfg: ScanConfig,
     """按目标配置构造适配器。
 
     - http/lab → HttpAdapter；sdk → SdkAdapter；
+    - mcp → McpAdapter（stdio 工具面，复用 dsh.mcp）；
     - folder（本地文件夹静态扫描）→ None（静态子代理接管）。
     """
     target = cfg.target
     if target.type == "folder":
         return None
+    if target.type == "mcp":
+        from ..adapters.mcp_adapter import McpAdapter
+        return McpAdapter(base_url=target.base_url,
+                          command=target.mcp_command,
+                          headers=target.headers, timeout_s=target.timeout_s)
     if target.type == "sdk" or sdk_handle is not None:
         if sdk_handle is None:
             raise ConfigError("sdk 类型目标需要传入 sdk_handle（靶场直连句柄）")
@@ -137,6 +143,8 @@ async def execute_sample(runtime: RedTeamRuntime, cfg: ScanConfig,
                           "resp": response.snippet(600),
                           "status": response.status,
                           "attempt": attempt + 1})
+    except UnsupportedSurface:
+        raise  # 由调用方（攻击子代理/回归）处理为 skipped
     except Exception as exc:
         result = VerdictResult(
             sample_uid=sample.uid, category=sample.category,

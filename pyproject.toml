@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dsh-red-blue-team"
-version = "0.1.0"
+version = "0.2.0"
 description = "基于 dsh-python 智能体框架的红队/蓝队安全检测系统：自动攻击、漏洞判定、自动修复、回归验证、wanter 自适应攻击优先级（内置 dsh 框架副本，自包含）"
 readme = "README.md"
 requires-python = ">=3.10"

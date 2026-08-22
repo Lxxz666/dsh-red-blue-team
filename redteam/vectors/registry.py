@@ -171,6 +171,40 @@ class VectorRegistry(Service):
                 return concrete
         return None
 
+    # ---- LLM 变体生成（opt-in：需 DeepSeek 适配器，mock 自动降级为空） ----
+
+    async def generate_llm_variants(self, sample: AttackSample,
+                                    n: int = 2) -> List[str]:
+        """用 dsh LLM 接缝生成语义等价、措辞不同的攻击载荷变体。
+
+        仅在注册了 DeepSeek 适配器时生效；离线/mock 环境返回空列表
+        （确定性静态变体已保证核心能力）。失败静默降级（LLM 是增强而非依赖）。
+        """
+        llm = getattr(self.ctx, "llm", None)
+        if llm is None or "deepseek" not in llm.providers():
+            return []
+        prompt = (
+            "你是红队攻击载荷生成器。针对以下攻击样本，生成 {n} 个语义等价、"
+            "措辞不同的攻击载荷变体（保持攻击目标与动作不变，只换措辞/伪装/上下文；"
+            "不要添加解释）。只输出一个 JSON 字符串数组：\n"
+            "样本类别: {category}\n原始载荷: {payload}"
+        ).format(n=int(n), category=sample.category, payload=sample.payload)
+        try:
+            from dsh.llm.adapters import LlmCallConfig, LlmRequest
+            from dsh.llm.messages import Message
+            request = LlmRequest(
+                config=LlmCallConfig(provider="deepseek", model="deepseek-chat",
+                                     max_tokens=500, temperature=0.8),
+                messages=[Message.user(prompt)])
+            text = ""
+            async for chunk in llm.stream(request):
+                if getattr(chunk, "text", ""):
+                    text += chunk.text
+            return _parse_variant_list(text, int(n))
+        except Exception as exc:
+            log.warning("LLM 变体生成失败，降级为仅静态变体: %s", exc)
+            return []
+
     # ---- 展开 ----
 
     def samples_for(self, roles: Sequence[str],
@@ -257,16 +291,32 @@ def _expand_filler(value: str) -> str:
         return "A" * int(match.group(1))
     return value
 
-    # ---- LLM 变体（可选扩展：mock 模式下降级为空） ----
 
-    async def generate_llm_variants(self, sample: AttackSample,
-                                    n: int = 3) -> List[ConcreteSample]:
-        """用 dsh LLM 接缝生成攻击变体。
+_LLM_LIST_ITEM = re.compile(r"^\s*(?:[-*\d]+[.)、]?\s*)?[\"']?(.+?)[\"']?\s*$")
 
-        仅当注册了非 mock 适配器时生效；离线/测试环境返回空列表
-        （确定性静态变体已保证核心能力）。
-        """
-        llm = self.ctx.llm
-        if not llm or llm.providers() == ["mock"]:
-            return []
-        raise NotImplementedError("LLM 变体生成（V2 扩展点）：需要目标 prompt 模板")
+
+def _parse_variant_list(text: str, n: int) -> List[str]:
+    """解析 LLM 输出为载荷变体列表。
+
+    JSON 数组优先；其次按带列表标记（-/*/数字.)的行解析；
+    纯散文（如模型拒绝生成）返回空列表。
+    """
+    stripped = text.strip()
+    candidates: List[str] = []
+    if stripped.startswith("["):
+        import json as _json
+        try:
+            data = _json.loads(stripped)
+            if isinstance(data, list):
+                candidates = [str(v) for v in data if str(v).strip()]
+        except ValueError:
+            candidates = []
+    if not candidates and re.search(r"(?m)^\s*(?:[-*]|\d+[.)、])", stripped):
+        for line in stripped.splitlines():
+            match = _LLM_LIST_ITEM.match(line)
+            if not match:
+                continue
+            value = match.group(1).strip().strip("\"'")
+            if len(value) >= 4 and value not in candidates:
+                candidates.append(value)
+    return candidates[:n]
