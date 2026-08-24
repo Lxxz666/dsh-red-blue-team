@@ -34,8 +34,8 @@ from ..runtime import RedTeamRuntime
 
 log = logging.getLogger("redteam.agents.llm")
 
-MAX_LLM_ATTACKS = 40          # LLM 自主攻击次数上限（防失控，鼓励多打）
-DEFAULT_TIMEOUT_S = 300.0     # agent 循环总超时
+MAX_LLM_ATTACKS = 100         # LLM 自主攻击次数上限（默认；可经 engine.llm_agent_max_attacks 调大）
+DEFAULT_TIMEOUT_S = 600.0     # agent 循环总超时
 MAX_SILENT_TURNS = 2          # 连续无工具调用的轮次上限（防止死循环）
 
 
@@ -74,6 +74,10 @@ class LlmAttackAgent:
         self.scan_id = scan_id
         self.script = script
         self.timeout_s = timeout_s
+        # 攻击上限：配置项优先（engine.llm_agent_max_attacks），默认 100
+        self.max_attacks = max(
+            1, int(getattr(cfg.engine, "llm_agent_max_attacks",
+                           MAX_LLM_ATTACKS)))
         self.attacks: List[ConcreteSample] = []
         self.verdicts: List[VerdictResult] = []
         self.final_report = ""
@@ -121,7 +125,7 @@ class LlmAttackAgent:
         silent_turns = 0
         start = time.time()
 
-        while (len(self.verdicts) < MAX_LLM_ATTACKS
+        while (len(self.verdicts) < self.max_attacks
                 and time.time() - start < self.timeout_s
                 and not self.final_report):
             self._turns += 1
@@ -217,7 +221,7 @@ class LlmAttackAgent:
         payload = str(parsed.get("payload", "")).strip()
         if not category or not payload:
             return None
-        if len(self.verdicts) >= MAX_LLM_ATTACKS:
+        if len(self.verdicts) >= self.max_attacks:
             return None
         base = self.runtime.registry.sample_by_id(
             _pick_sample_id(self.runtime, category))

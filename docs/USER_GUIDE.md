@@ -107,7 +107,8 @@ vectors:
 ```yaml
 engine:
   llm_agent: true                  # LLM 自主攻击（确定性多轮驱动循环）
-  llm_agent_timeout_s: 300         # 循环总超时（另有 40 次攻击硬上限）
+  llm_agent_max_attacks: 100       # 攻击次数上限（默认 100，可调大）
+  llm_agent_timeout_s: 600         # 循环总超时
 ```
 
 开启后（需 `DEEPSEEK_API_KEY`），扫描首轮结束后主 Agent 派发 **LLM 自主攻击
@@ -115,7 +116,7 @@ Agent**。核心是**确定性多轮驱动循环**——不依赖模型"自觉�
 常攻击 1~4 次就输出文本收尾），而是每轮强制模型给出下一步：
 
 ```
-循环（直到 finalize / 40 次攻击上限 / 超时）：
+循环（直到 finalize / 100 次攻击上限 / 超时）：
   ① LLM 调用（tools + tool_choice=required，必须给下一步）；
   ② 解析：attack_vector → 执行真实攻击 + 确定性判定 → 记录，
      结果以文本历史回喂 LLM；finalize_report → 记录报告并结束；
@@ -124,8 +125,10 @@ Agent**。核心是**确定性多轮驱动循环**——不依赖模型"自觉�
 
 - **参考攻击手法注入**：mission 自动注入样本库代表载荷（每类别一条），
   让模型模仿构造手法生成针对性变体载荷；
-- **实测**：单轮 **40 次自主攻击 · 6 漏洞命中 · 覆盖 20 个攻击类别**
-  （direct_injection/prompt_extraction/sensitive_data/sqli/xss/ssti/ssrf…）；
+- **实测**：单轮 **100 次自主攻击 · 37 漏洞命中 · 覆盖 18 个攻击类别**
+  （sensitive_data/indirect_injection/prompt_extraction/tool_abuse/
+  direct_injection/secret_leak…）；
+- 攻击上限可经 `engine.llm_agent_max_attacks` 调整（默认 100，可继续调大）；
 - 判定仍走确定性管线（LLM 无法"自我判定成功"）；无 LLM 时优雅降级为空操作。
 
 ### 对接真实 HTTP 目标协议约定
