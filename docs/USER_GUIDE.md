@@ -106,15 +106,27 @@ vectors:
 
 ```yaml
 engine:
-  llm_agent: true                  # LLM 在完整 dsh agent loop 中自主攻击决策
-  llm_agent_timeout_s: 120         # 循环超时（另有 20 次攻击上限）
+  llm_agent: true                  # LLM 自主攻击（确定性多轮驱动循环）
+  llm_agent_timeout_s: 300         # 循环总超时（另有 40 次攻击硬上限）
 ```
 
 开启后（需 `DEEPSEEK_API_KEY`），扫描首轮结束后主 Agent 派发 **LLM 自主攻击
-Agent**：LLM 读取扫描摘要，持 `attack_vector`（发起攻击并返回判定）与
-`finalize_report`（提交结论）两个工具，在 dsh agent loop 中自主
-"攻击 → 观察判定 → 调整载荷 → 再攻击"，最终提交攻击报告并入扫描结果
-（判定/落库/审计/态势综述）。无 LLM 时优雅降级为空操作，不产生任何攻击。
+Agent**。核心是**确定性多轮驱动循环**——不依赖模型"自觉持续攻击"（多数模型
+常攻击 1~4 次就输出文本收尾），而是每轮强制模型给出下一步：
+
+```
+循环（直到 finalize / 40 次攻击上限 / 超时）：
+  ① LLM 调用（tools + tool_choice=required，必须给下一步）；
+  ② 解析：attack_vector → 执行真实攻击 + 确定性判定 → 记录，
+     结果以文本历史回喂 LLM；finalize_report → 记录报告并结束；
+  ③ 历史持续累积，模型每次决策基于全部攻击历史。
+```
+
+- **参考攻击手法注入**：mission 自动注入样本库代表载荷（每类别一条），
+  让模型模仿构造手法生成针对性变体载荷；
+- **实测**：单轮 **40 次自主攻击 · 6 漏洞命中 · 覆盖 20 个攻击类别**
+  （direct_injection/prompt_extraction/sensitive_data/sqli/xss/ssti/ssrf…）；
+- 判定仍走确定性管线（LLM 无法"自我判定成功"）；无 LLM 时优雅降级为空操作。
 
 ### 对接真实 HTTP 目标协议约定
 

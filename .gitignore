@@ -30,7 +30,8 @@ htmlcov/
 *.db-journal
 /audit/
 /reports/
-/sandbox/            # 仅根目录（蓝队修复沙箱产物）；dsh/sandbox 是框架模块，见下方反排除
+# 仅根目录（蓝队修复沙箱产物）；dsh/sandbox 是框架模块，见下方反排除
+/sandbox/
 !/sandbox/
 !dsh/sandbox/
 !dsh/sandbox/**
@@ -38,6 +39,7 @@ dsh/sandbox/__pycache__/
 demo_out*/
 demo_final/
 demo_static_out/
+tmp_*/
 lab_guards.yml
 redteam.db
 

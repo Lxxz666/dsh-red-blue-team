@@ -478,7 +478,7 @@ class AttackOrchestrator:
                                      model=os.environ.get("DEEPSEEK_MODEL",
                                                           "deepseek-chat"),
                                      max_tokens=200),
-                messages=[Message("user", prompt)])
+                messages=[Message.user(prompt)])
             out = ""
             async for chunk in llm.stream(request):
                 if getattr(chunk, "text", ""):

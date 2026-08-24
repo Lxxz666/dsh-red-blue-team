@@ -157,9 +157,11 @@ domain 分区 = 目标类型×业务域；持久化 = SQLite JSON 快照。
 - ~~MCP 目标适配~~（已交付：`dsh.mcp` 客户端直连工具面 + 工具滥用/越权/投毒样本）；
 - ~~LLM 载荷变体生成~~（已交付：opt-in，DeepSeek 可用时增强攻击计划）；
 - ~~LLM 多轮攻击链 + 定向补打~~（已交付：静态链/LLM 链/未命中向量补打，均 opt-in）；
-- ~~LLM 自主攻击 Agent~~（已交付 V11：`engine.llm_agent` 开启后，LLM 在完整 dsh
-  agent loop 中持 attack_vector/finalize_report 工具自主攻击-观察-调整并提交
-  攻击报告；次数/超时双重上限；无 LLM 优雅降级为空操作）；
+- ~~LLM 自主攻击 Agent~~（已交付 V11：`engine.llm_agent` 开启后，主 Agent 派发
+  LLM 自主攻击 Agent，**确定性多轮驱动循环**——每轮强制工具调用
+  （tools + tool_choice=required），持续攻击至 finalize/40 次上限/超时；
+  注入参考攻击手法，实测单轮 40 次自主攻击 · 20 类别；判定走确定性管线；
+  无 LLM 优雅降级为空操作）；
 - 子Agent 升级为 dsh 完整 agent loop（LLM 驱动的侦察推理/攻击链编排）；
 - D5 业务逻辑/D6 数据/D8 供应链/D9 运行时检测面样本库（YAML 零改动接入）；
 - 静态扫描扩展（SAST 语义规则/多语言/IaC 模板）；
