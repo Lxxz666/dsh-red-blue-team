@@ -173,12 +173,17 @@ async def test_upload_rejects_zip_slip(client):
     assert "非法压缩包路径" in resp.json()["detail"]
 
 
-async def test_non_local_url_forbidden(client):
-    """无授权配置时，非本地网址必须 403（合规闸门）。"""
+async def test_non_local_url_accepted(client):
+    """本地测试便利：任意网址直接创建任务（不再要求 authorization 块）。"""
+    # 域名解析必然失败的地址 → 后台任务快速失败，不影响创建语义
     resp = await client.post("/api/tasks", json={
-        "name": "外部目标", "url": "https://example.com"})
-    assert resp.status_code == 403
-    assert "授权" in resp.json()["detail"]
+        "name": "外部目标", "url": "http://nonexistent.invalid"})
+    assert resp.status_code == 200
+    task_id = resp.json()["task_id"]
+    tasks = (await client.get("/api/tasks")).json()["tasks"]
+    row = next(t for t in tasks if t["task_id"] == task_id)
+    assert row["target"] == "http://nonexistent.invalid"
+    assert row["status"] in ("queued", "running", "finished", "failed")
 
 
 async def test_bad_url_rejected(client):

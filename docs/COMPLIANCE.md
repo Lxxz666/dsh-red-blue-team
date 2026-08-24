@@ -14,7 +14,8 @@
 
 | 闸门 | 位置 | 行为 |
 |:--|:--|:--|
-| 授权校验 | `redteam/config.py` | 非本地目标（非 127.0.0.1/localhost）缺少 `authorization` 块 → 拒绝扫描（退出码 2） |
+| 授权校验（CLI） | `redteam/config.py` | CLI 扫描非本地目标（非 127.0.0.1/localhost）缺少 `authorization` 块 → 拒绝扫描（退出码 2） |
+| Web 面板 | `redteam/web/panel.py` | 本地测试便利：任意 http(s) 网址直接输入创建任务；「蓝队自动修复」仅对面板自带靶场生效，其余网址只输出修复方案绝不自动修改 |
 | 文件夹扫描豁免 | `redteam/config.py` | 本地文件夹静态扫描（type=folder）只读审计自有代码，不发起网络攻击，无需授权声明 |
 | 授权留存 | `scan.yml → audit` | 每次扫描的配置路径与授权声明写入事件溯源审计日志 |
 | 节流保护 | `engine.min_interval_ms` / `concurrency` | 内置请求节流与并发上限，防把目标打挂 |

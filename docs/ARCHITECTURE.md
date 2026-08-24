@@ -139,7 +139,9 @@ domain 分区 = 目标类型×业务域；持久化 = SQLite JSON 快照。
   （prepare/recon/attack/fix，状态+起止时间+摘要）与 `logs`（订阅 dsh 事件总线：
   `attack/executed`/`attack/verdict`/`finding/detected`/`fix/…` 实时成行，
   内存环形 2000 条 + `web_runtime/tasks/<id>.jsonl` 落盘可回放）；
-- 授权闸门：非本地网址且无 `authorization` 配置块 → 创建任务即 403；
+- 网址任务类型判定：面板自带靶场（type=lab 且网址相同）保留 lab 语义（自动修复+
+  回归可用）；其余网址一律外部目标 http（只出方案，绝不自动修改目标）；
+  任意 http(s) 网址直接输入即可（本地测试便利，无授权配置门槛）；
 - 前端：`static/index.html` 单文件原生 JS 暗色仪表盘（无外部依赖，离线可用）——
   网址输入/拖拽上传/任务卡片/步骤时间线/日志控制台/漏洞表/Markdown 报告渲染/一键修复。
 

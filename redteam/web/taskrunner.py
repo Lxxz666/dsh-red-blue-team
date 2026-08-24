@@ -212,20 +212,9 @@ class TaskRunner:
 
     # ---- 配置构造 ----
 
-    def check_url_allowed(self, url: str) -> None:
-        """授权闸门：非本地目标需要 authorization 配置块。"""
-        host = url.split("//")[-1].split("/")[0].split(":")[0]
-        if host not in ("127.0.0.1", "localhost", "::1") and \
-                not self.cfg.authorization.valid():
-            raise PermissionError(
-                "非本地目标需要授权声明：请通过配置文件启动面板（--config 带 "
-                "authorization 块），或只对本地/靶场目标使用网址输入。")
-
     def _build_url_config(self, task: Dict[str, Any]) -> ScanConfig:
         cfg = self.cfg
         target = cfg.target
-        # Web 面板直接输入网址：合规闸门照常生效（非本地目标需在面板配置授权）
-        self.check_url_allowed(task["target_url"])
         # 面板自带靶场（type=lab 且网址相同）：保留 lab 语义（蓝队可自动修复+回归）；
         # 其余网址一律视为外部目标 http（只出方案，绝不自动修改）
         if target.type == "lab" and \

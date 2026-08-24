@@ -2,7 +2,7 @@
 
 面向验收的核心面板：
 - POST /api/tasks            {name, url, llm_agent, llm_explorer, blue_fix}
-                             创建网址扫描任务（授权闸门照常生效）
+                             创建网址扫描任务（任意 http(s) 网址，本地测试直接输入）
 - POST /api/tasks/upload     原始 ZIP 体（?name=项目名）→ 解压解析 → 静态扫描任务
 - GET  /api/tasks            任务列表（状态/步骤进度/漏洞数）
 - GET  /api/tasks/{id}       任务详情：步骤时间线 + 日志（?after=N 增量拉取）
@@ -71,19 +71,12 @@ def create_app(cfg: ScanConfig, runtime_dir: str,
         if not url.startswith(("http://", "https://")):
             raise HTTPException(status_code=400,
                                 detail="网址需以 http:// 或 https:// 开头")
-        try:
-            runner.check_url_allowed(url)
-        except PermissionError as exc:
-            raise HTTPException(status_code=403, detail=str(exc))
-        try:
-            task_id = runner.submit(
-                name=name, target_url=url,
-                llm_agent=bool(payload.get("llm_agent")),
-                llm_explorer=bool(payload.get("llm_explorer")),
-                llm_fix_plan=bool(payload.get("llm_fix_plan")),
-                blue_fix=bool(payload.get("blue_fix")))
-        except PermissionError as exc:
-            raise HTTPException(status_code=403, detail=str(exc))
+        task_id = runner.submit(
+            name=name, target_url=url,
+            llm_agent=bool(payload.get("llm_agent")),
+            llm_explorer=bool(payload.get("llm_explorer")),
+            llm_fix_plan=bool(payload.get("llm_fix_plan")),
+            blue_fix=bool(payload.get("blue_fix")))
         return {"task_id": task_id, "status": "queued"}
 
     @app.post("/api/tasks/upload")
