@@ -7,7 +7,7 @@
 
 ![CI](https://github.com/Lxxz666/dsh-red-blue-team/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-325%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-334%20passed-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 **别的工具告诉你"哪里可能有问题"，dsh-red-blue-team 直接攻击给你看，然后修好它，再攻击一遍证明修好了。**
@@ -18,7 +18,7 @@
 
 | 上线前的焦虑 | 本项目的答案 |
 |:--|:--|
-| "我的 AI 客服会被提示注入打穿吗？" | 51 类攻击向量自动打一遍，注入/提权/投毒**当场演示** |
+| "我的 AI 客服会被提示注入打穿吗？" | 54 类攻击向量自动打一遍，注入/提权/投毒**当场演示**（含多轮攻击链诱导） |
 | "低权限用户能越权操作吗？" | 按角色×业务场景矩阵攻击，IDOR/批量赋值/功能越权全覆盖 |
 | "我的业务逻辑（改价/叠加券/重复退款）安全吗？" | **12 大业务场景**专属攻击样本（WSTG-BUSL 方法论） |
 | "我的 Agent 挂了 MCP 工具，安全吗？" | 给 MCP 服务，**直接向工具注入恶意参数**打一遍 |
@@ -44,7 +44,10 @@ python -m redteam.cli static <你的项目文件夹>
 # ④ 给一个 MCP 服务：工具面攻击（tools/call 注入恶意参数）
 python -m redteam.cli scan --config examples/scan_mcp.yaml
 
-# ⑤ 业务场景库 / 攻击样本库 / 自适应基准
+# ⑤ Web 面板：网页发起扫描/看漏洞/跑修复（默认自动挂内置靶场）
+python -m redteam.cli web --port 8766
+
+# ⑥ 业务场景库 / 攻击样本库 / 自适应基准
 python -m redteam.cli scenarios list
 python -m redteam.cli samples list
 python -m redteam.cli bench --config examples/scan_lab.yaml
@@ -59,7 +62,7 @@ python -m redteam.cli bench --config examples/scan_lab.yaml
 | 埋入漏洞发现率 | **37/37 = 100%** | 内置靶场 37 个埋入漏洞（验收线 ≥80%），`test_scan_e2e` 每次 CI 强制 |
 | 误报率（全加固靶场复扫） | **0 命中** | 修复完成的靶场复扫必须清零，否则 CI 失败 |
 | 修复闭环 | **89 命中 → 89 修复 → 89 回归通过 → 复扫 0 命中** | 蓝队自动修复+回归验证，同一攻击重跑必须清零 |
-| 测试规模 | **325 passed**（框架 224 + 红蓝队 101） | 判定/靶场/场景/静态/多Agent/MCP/回归全链路，GitHub Actions 双 Python 版本 |
+| 测试规模 | **334 passed**（框架 224 + 红蓝队 110） | 判定/靶场/场景/静态/多Agent/MCP/攻击链/Web面板/回归全链路，GitHub Actions 双 Python 版本 |
 | 扫描确定性 | 两次扫描命中集合**完全一致** | 状态型样本串行通道+重置隔离，报告可复现审计 |
 | 自适应收益（wanter 地形） | 25% 预算下命中率 **+10.5%**，覆盖效率提速 **+9.0%** | bench 命令：随机基线 vs 地形序二次扫描对比 |
 | 检测面 | **71 条基础样本 × 54 个攻击类别** | D1 Web / D2 API / D3 LLM / D7 配置 + D19 业务场景 + MCP 工具面 |
@@ -116,6 +119,7 @@ AttackOrchestrator（主 Agent）
   ├─① ReconAgent          侦察子Agent：能力/安全头/端点/业务场景指纹
   ├─② StaticAgent         静态子Agent（文件夹模式）：代码级审计
   ├─③ 攻击计划 = 检测面 × 角色 × 业务场景（wanter 地形优先级排序）
+  │     + 多轮攻击链（静态链模板 + LLM 链生成 opt-in）
   ├─④ 并行攻击子Agent（每个子Agent独立 dsh scoped ctx）
   │     attacker-student   ─┐
   │     attacker-customer  ─┼─ WorkerReport{判定/证据} ─┐
@@ -123,6 +127,7 @@ AttackOrchestrator（主 Agent）
   ├─⑤ 主Agent汇总 → 漏洞落库 → 攻击报告（含态势综述）◀──┘
   ▼
 BlueEngine（蓝队）：68 类修复模板 → 沙箱应用 → 回归清零 → 完整修复报告
+Web 面板：dsh-redteam web（网页发起扫描/漏洞清单/报告/一键修复）
 ```
 
 - **确定性判定**：证据模式/敏感泄露/副作用探测/重定向/安全头缺失等硬信号优先，
@@ -141,12 +146,12 @@ BlueEngine（蓝队）：68 类修复模板 → 沙箱应用 → 回归清零 �
 ```
 dsh-red-blue-team/
 ├── dsh/                 # dsh-python 框架完整副本（插件内核/wanter/llm/session/mcp…）
-├── redteam/             # 红蓝队层：agents(主/子Agent) scenarios(12场景) static(代码审计)
-│                        #   vectors(样本库) detector(判定) blueteam(修复) reporter(报告)
+├── redteam/             # 红蓝队层：agents(主/子Agent+攻击链) scenarios(12场景) static(代码审计)
+│                        #   vectors(样本库) detector(判定) blueteam(修复) reporter(报告) web(面板)
 │                        #   adaptive(wanter地形) adapters(http/sdk/mcp) engine storage audit runtime config models
 ├── target_lab/          # 内置靶场（37 埋入漏洞 + 业务场景 API + 可修复 guards）
-├── sample_bank/         # 71 条攻击样本（YAML，四大检测面 + 12 业务场景 + MCP 工具面）
-├── tests/ + tests_redteam/  # 325 项测试（含发现率≥80%、零误报、回归清零、MCP 验收）
+├── sample_bank/         # 71 条攻击样本（YAML，四大检测面 + 12 业务场景 + MCP 工具面 + 多轮链模板）
+├── tests/ + tests_redteam/  # 334 项测试（含发现率≥80%、零误报、回归清零、MCP/攻击链/Web 验收）
 ├── .github/workflows/   # GitHub Actions CI（双 Python 版本全量测试 + 靶场验收）
 ├── examples/  docs/     # 示例配置（网址/文件夹/MCP）/ 架构·用户·攻击目录·场景·合规文档
 └── README.md
@@ -171,9 +176,11 @@ dsh-red-blue-team/
 - [x] V4 双模式输入：网址动态扫描 / 文件夹静态审计（CVE-lite 依赖比对）
 - [x] V5 MCP 目标适配：dsh.mcp 直连工具面，工具滥用/越权/投毒攻击样本（对话样本自动跳过）
 - [x] V6 LLM 载荷变体生成（opt-in，DeepSeek 可用时增强攻击计划，失败静默降级）
+- [x] V7 多轮攻击链编排：静态链模板（铺垫诱导）+ LLM 链生成（opt-in），全链入审计与报告
+- [x] V8 Web 面板：FastAPI + 原生 JS（扫描任务/漏洞清单/报告/蓝队修复，`dsh-redteam web` 一键起）
 - [x] CI 自动化：GitHub Actions 双 Python 版本全量测试 + 靶场验收 job
-- [ ] V7 LLM 驱动的完整攻击链编排（子Agent 升级为完整 agent loop）
-- [ ] V8 Web 面板（复用 dsh FastAPI）
+- [ ] V9 子Agent 升级为完整 LLM agent loop（LLM 驱动的自主攻击链编排）
+- [ ] V10 定时扫描与报告推送
 
 ## 📄 License
 

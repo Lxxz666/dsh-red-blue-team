@@ -34,6 +34,7 @@ include = ["dsh*", "redteam*", "target_lab*", "sample_bank*"]
 "dsh.config.bundles" = ["*.yml"]
 "dsh.server.static" = ["*.html", "*.css", "*.js"]
 "sample_bank" = ["*.yaml"]
+"redteam.web.static" = ["*.html"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

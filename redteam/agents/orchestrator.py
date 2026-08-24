@@ -198,6 +198,9 @@ class AttackOrchestrator:
         # LLM 变体生成（opt-in：DeepSeek 可用时增强攻击计划，失败静默降级）
         if cfg.vectors.llm_variants and cfg.vectors.llm_variants_per_sample > 0:
             samples = await self._append_llm_variants(samples, categories)
+        # LLM 多轮攻击链生成（opt-in：同样降级）
+        if cfg.vectors.llm_chains and cfg.vectors.llm_chains_per_sample > 0:
+            samples = await self._append_llm_chains(samples, categories)
         if cfg.engine.samples_limit:
             samples = samples[:cfg.engine.samples_limit]
         if self.order == "adaptive" and cfg.adaptive.enabled:
@@ -241,6 +244,43 @@ class AttackOrchestrator:
                     llm_count += 1
         if llm_count:
             log.info("LLM 变体生成：新增 %d 条攻击载荷变体", llm_count)
+        additions.sort(key=lambda s: (s.category, s.sample.id, s.uid))
+        return list(samples) + additions
+
+    async def _append_llm_chains(self, samples: List[ConcreteSample],
+                                 categories: List[str]) -> List[ConcreteSample]:
+        """为选中类别的基础样本生成 LLM 多轮攻击链（铺垫消息 + 攻击载荷）。"""
+        cfg, rt = self.cfg, self.runtime
+        wanted = set(categories)
+        chain_count = 0
+        additions: List[ConcreteSample] = []
+        for base in rt.registry.samples:
+            if "all" not in wanted and base.category not in wanted:
+                continue
+            if base.surface != "chat":
+                continue
+            try:
+                chains = await rt.registry.generate_llm_chains(
+                    base, n=cfg.vectors.llm_chains_per_sample)
+            except Exception as exc:
+                log.debug("LLM 攻击链生成异常（跳过）: %s", exc)
+                chains = []
+            if not chains:
+                continue
+            roles = [r for r in (base.role_context or list(cfg.vectors.roles))
+                     if r in cfg.vectors.roles]
+            for role in roles:
+                for index, messages in enumerate(chains):
+                    prelude, payload = messages[:-1], messages[-1]
+                    additions.append(ConcreteSample(
+                        uid=f"{base.id}-{role}-llmchain{index}",
+                        sample=base, role=role, payload=payload,
+                        params={}, body={}, path="",
+                        variant_index=800 + index, variant_of="llm-chain",
+                        prelude=prelude))
+                    chain_count += 1
+        if chain_count:
+            log.info("LLM 攻击链生成：新增 %d 条多轮攻击链", chain_count)
         additions.sort(key=lambda s: (s.category, s.sample.id, s.uid))
         return list(samples) + additions
 

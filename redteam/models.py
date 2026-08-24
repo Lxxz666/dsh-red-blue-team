@@ -69,6 +69,7 @@ class AttackSample:
     tags: List[str] = field(default_factory=list)
     repeat: int = 1                     # 同一载荷连续发送次数（幂等/竞态类攻击）
     stateful: bool = False              # 会修改目标状态（串行通道+重置隔离）
+    chains: List[List[str]] = field(default_factory=list)  # 静态多轮链模板（每项=铺垫消息序列）
 
 
 @dataclass
@@ -82,7 +83,8 @@ class ConcreteSample:
     body: Dict[str, str] = field(default_factory=dict)
     path: str = ""
     variant_index: int = 0
-    variant_of: str = ""               # 变体来源：variables / paraphrase / base
+    variant_of: str = ""               # 变体来源：variables / paraphrase / base / chain / llm
+    prelude: List[str] = field(default_factory=list)  # 多轮攻击链的铺垫消息序列
 
     @property
     def id(self) -> str:

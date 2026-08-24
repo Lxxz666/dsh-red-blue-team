@@ -105,7 +105,11 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         if self.command != "HEAD":
-            self.wfile.write(body)
+            try:
+                self.wfile.write(body)
+            except (ConnectionAbortedError, ConnectionResetError,
+                    BrokenPipeError, OSError):
+                pass  # 客户端已断开（扫描器关连接/靶场关停），静默处理
 
     do_GET = _dispatch
     do_POST = _dispatch

@@ -99,6 +99,8 @@ class VectorsConfig:
     bank_dir: str = ""                 # 空 = 包内 sample_bank
     llm_variants: bool = False         # LLM 变体生成（需 DeepSeek 密钥；mock 自动降级）
     llm_variants_per_sample: int = 2   # 每个基础样本的 LLM 变体数上限
+    llm_chains: bool = False           # LLM 多轮攻击链生成（需 DeepSeek 密钥；失败降级）
+    llm_chains_per_sample: int = 1     # 每个基础样本的 LLM 链数上限
 
 
 @dataclass
@@ -211,6 +213,9 @@ class ScanConfig:
             llm_variants=bool(vectors.get("llm_variants", False)),
             llm_variants_per_sample=max(0, int(vectors.get(
                 "llm_variants_per_sample", 2))),
+            llm_chains=bool(vectors.get("llm_chains", False)),
+            llm_chains_per_sample=max(0, int(vectors.get(
+                "llm_chains_per_sample", 1))),
         )
         detector = raw.get("detector") or {}
         cfg.detector = DetectorConfig(

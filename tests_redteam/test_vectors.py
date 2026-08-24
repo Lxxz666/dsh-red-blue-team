@@ -41,8 +41,9 @@ def test_variant_budget_respected():
     registry = _registry()
     samples = registry.samples_for(["student", "customer", "admin"],
                                    ["direct_injection"], variants_per_sample=2)
-    # di-001/di-002 两个基础样本 × 2 角色 × 2 变体
-    assert len(samples) == 2 * 2 * 2
+    # di-001/di-002 两个基础样本 × 2 角色 × 2 变体 = 8
+    # + di-001 静态攻击链 1 条 × 2 角色 = 2 → 共 10
+    assert len(samples) == 8 + 2
 
 
 def test_variant_uid_stable_and_rebuildable():

@@ -130,6 +130,19 @@ async def execute_sample(runtime: RedTeamRuntime, cfg: ScanConfig,
         except Exception as exc:  # 基线失败不阻断攻击
             log.debug("基线消息失败: %s", exc)
 
+    # 多轮攻击链：铺垫消息逐条发送（上下文诱导），每轮记录审计
+    for prelude_msg in sample.prelude:
+        try:
+            prelude_resp = await adapter.send_text(prelude_msg, role=sample.role)
+        except UnsupportedSurface:
+            raise  # 目标不支持对话（如 MCP）：整条链跳过
+        except Exception as exc:
+            log.debug("攻击链铺垫消息失败: %s", exc)
+            prelude_resp = TargetResponse(status=0, text=f"(铺垫失败: {exc})")
+        chain.append({"turn": len(chain) + 1, "role": sample.role,
+                      "msg": prelude_msg, "resp": prelude_resp.snippet(300),
+                      "status": prelude_resp.status, "kind": "prelude"})
+
     expect_side = "side_effect" in sample.sample.expected_signals
     if expect_side:
         pre = await adapter.check_side_effect()

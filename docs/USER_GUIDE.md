@@ -32,6 +32,7 @@ pip install -e .                       # 可选：安装 dsh-redteam / dsh-pytho
 | `dsh-redteam bench --config scan.yml` | 自适应优先级基准（随机基线 vs wanter 地形序） |
 | `dsh-redteam samples [list｜show CATEGORY]` | 攻击样本库（54 类别） |
 | `dsh-redteam scenarios [list｜show ID]` | 业务场景库（12 场景指纹与攻击点） |
+| `dsh-redteam web [--config scan.yml] [--port 8766]` | **Web 面板**：网页发起扫描/漏洞清单/报告/一键修复（默认自动挂靶场） |
 
 ## 4. 最小上手（3 条命令）
 

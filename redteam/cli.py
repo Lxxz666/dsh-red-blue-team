@@ -93,6 +93,13 @@ def build_parser() -> argparse.ArgumentParser:
     scenarios.add_argument("action", nargs="?", default="list",
                            choices=["list", "show"])
     scenarios.add_argument("scenario", nargs="?", default=None)
+
+    web = sub.add_parser("web", help="Web 面板（扫描任务/漏洞/报告/修复）")
+    web.add_argument("--config", default=None, help="扫描配置（省略时自动挂内置靶场）")
+    web.add_argument("--port", type=int, default=8766)
+    web.add_argument("--host", default="127.0.0.1")
+    web.add_argument("--with-lab", action="store_true",
+                     help="自动启动内置靶场并以其为目标")
     return parser
 
 
@@ -118,6 +125,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             cmd_samples(args)
         elif args.command == "scenarios":
             cmd_scenarios(args)
+        elif args.command == "web":
+            cmd_web(args)   # uvicorn 自行管理事件循环（同步入口）
         else:
             build_parser().print_help()
             return 1
@@ -563,6 +572,47 @@ def cmd_scenarios(args: argparse.Namespace) -> None:
     print(f"  端点指纹: {scenario.endpoint_keywords}")
     print(f"  内容指纹: {scenario.content_keywords}")
     print(f"  专属样本类别: {scenario.sample_categories}")
+
+
+def cmd_web(args: argparse.Namespace) -> None:
+    """Web 面板：dsh-redteam web [--config scan.yml] [--with-lab]（阻塞运行）"""
+    lab = None
+    guards_file = ""
+    if args.config and not args.with_lab:
+        cfg = ScanConfig.from_yaml(args.config)
+    else:
+        # 默认模式：自动起内置靶场作为目标（含 4 业务场景）
+        from target_lab import build_default_guards_file, start_lab
+        out_dir = os.path.join(os.getcwd(), "web_runtime")
+        os.makedirs(out_dir, exist_ok=True)
+        guards_file = os.path.join(out_dir, "lab_guards.yml")
+        build_default_guards_file(guards_file)
+        lab = start_lab(guards_file=guards_file, port=0)
+        base = {"name": "web-demo-lab", "type": "lab",
+                "base_url": lab.base_url, "guards_file": guards_file}
+        if args.config:   # --config + --with-lab：沿用配置但指向内置靶场
+            cfg = ScanConfig.from_yaml(args.config)
+            cfg.target.type = "lab"
+            cfg.target.base_url = lab.base_url
+            cfg.target.guards_file = guards_file
+        else:
+            cfg = ScanConfig.from_dict({
+                "profile": "quick",
+                "target": base,
+                "vectors": {"variants_per_sample": 1},
+                "blueteam": {"enabled": True,
+                             "sandbox_dir": os.path.join(out_dir, "sandbox")},
+                "storage": {"db_path": os.path.join(out_dir, "web.db"),
+                            "audit_dir": os.path.join(out_dir, "audit")},
+                "out_dir": os.path.join(out_dir, "reports"),
+                "engine": {"concurrency": 4, "min_interval_ms": 5},
+            })
+    from .web.panel import create_app
+    app = create_app(cfg, lab=lab)
+    import uvicorn
+    print(f"🔴🔵 dsh-red-blue-team Web 面板: http://{args.host}:{args.port}")
+    print(f"   目标: {cfg.target.name}（{cfg.target.base_url or cfg.target.folder_path}）")
+    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
 
 
 if __name__ == "__main__":

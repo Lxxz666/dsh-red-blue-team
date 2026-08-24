@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dsh-red-blue-team · 红蓝队安全检测面板</title>
+<style>
+  :root { --bg:#0f1117; --panel:#161b26; --border:#2a3242; --fg:#e6e9ef;
+          --dim:#8b93a7; --accent:#00c2ff; --ok:#20e3b2; --bad:#ff6b6b;
+          --warn:#ffb86c; --purple:#a855f7; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--fg); font-family:"Segoe UI",system-ui,sans-serif; padding:20px; }
+  h1 { font-size:22px; margin-bottom:4px; }
+  .sub { color:var(--dim); font-size:13px; margin-bottom:18px; }
+  .row { display:flex; gap:16px; flex-wrap:wrap; }
+  .col { flex:1 1 420px; min-width:340px; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:14px; margin-bottom:16px; }
+  .card h2 { font-size:15px; margin-bottom:10px; color:var(--accent); }
+  button { background:var(--accent); color:#04121a; border:none; border-radius:6px;
+           padding:8px 16px; font-weight:600; cursor:pointer; font-size:13px; }
+  button.secondary { background:transparent; border:1px solid var(--border); color:var(--fg); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--border); }
+  th { color:var(--dim); font-weight:500; }
+  .tag { display:inline-block; padding:2px 8px; border-radius:10px; font-size:12px; }
+  .critical { background:rgba(255,107,107,.15); color:var(--bad); }
+  .high { background:rgba(255,184,108,.15); color:var(--warn); }
+  .medium { background:rgba(255,219,128,.12); color:#ffdb80; }
+  .low { background:rgba(32,227,178,.12); color:var(--ok); }
+  .status-running { color:var(--accent); } .status-finished { color:var(--ok); }
+  .status-failed { color:var(--bad); } .status-queued { color:var(--dim); }
+  pre { background:#0b0e14; border:1px solid var(--border); border-radius:8px;
+        padding:12px; font-size:12px; overflow:auto; max-height:520px; white-space:pre-wrap; }
+  .msg { color:var(--dim); font-size:13px; margin-top:8px; }
+</style>
+</head>
+<body>
+  <h1>🔴🔵 dsh-red-blue-team <span style="color:var(--purple)">控制面板</span></h1>
+  <div class="sub" id="configLine">加载配置中…</div>
+
+  <div class="row">
+    <div class="col">
+      <div class="card">
+        <h2>扫描任务</h2>
+        <div style="display:flex;gap:8px;margin-bottom:10px;">
+          <button id="btnScan" onclick="startScan()">▶ 发起红队扫描</button>
+          <button class="secondary" onclick="refreshAll()">↻ 刷新</button>
+        </div>
+        <table id="taskTable">
+          <thead><tr><th>任务</th><th>目标</th><th>状态</th><th>样本</th><th>命中</th><th>漏洞</th><th></th></tr></thead>
+          <tbody><tr><td colspan="7" class="msg">暂无任务</td></tr></tbody>
+        </table>
+        <div class="msg" id="scanMsg"></div>
+      </div>
+
+      <div class="card">
+        <h2>漏洞清单</h2>
+        <table id="findingTable">
+          <thead><tr><th>#</th><th>类别</th><th>级别</th><th>角色</th><th>修复建议</th></tr></thead>
+          <tbody><tr><td colspan="5" class="msg">发起扫描后此处显示漏洞</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="card">
+        <h2>攻击报告</h2>
+        <div style="display:flex;gap:8px;margin-bottom:10px;">
+          <button class="secondary" id="btnReport" onclick="loadReport()" disabled>查看报告</button>
+          <button class="secondary" id="btnFix" onclick="runFix()" disabled>🛠 蓝队修复+回归</button>
+        </div>
+        <pre id="reportView">选择任务后查看攻击报告</pre>
+        <div class="msg" id="reportMsg"></div>
+      </div>
+
+      <div class="card">
+        <h2>完整修复报告</h2>
+        <pre id="remediationView" style="max-height:360px;">修复后生成（问题说明+代码级方案+验证步骤）</pre>
+      </div>
+    </div>
+  </div>
+
+<script>
+let currentTask = null;
+const sevTag = s => `<span class="tag ${s}">${s}</span>`;
+const statusTag = s => `<span class="status-${s}">${s}</span>`;
+
+async function api(path, opts) {
+  const resp = await fetch(path, opts);
+  if (!resp.ok) throw new Error((await resp.text()).slice(0, 200));
+  return resp.json();
+}
+
+async function refreshAll() {
+  try {
+    const cfg = await api("/api/config");
+    document.getElementById("configLine").textContent =
+      `目标: ${cfg.target} ｜ 类型: ${cfg.type} ｜ 场景: ${cfg.scenario} ｜ 角色: ${cfg.roles.join(", ")}`;
+    const data = await api("/api/scans");
+    const tbody = document.querySelector("#taskTable tbody");
+    if (!data.tasks.length) {
+      tbody.innerHTML = `<tr><td colspan="7" class="msg">暂无任务</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = data.tasks.map(t => `
+      <tr>
+        <td>${t.task_id}</td><td>${t.target || "-"}</td>
+        <td>${statusTag(t.status)}</td>
+        <td>${t.total ?? "-"}</td><td>${t.success ?? "-"}</td>
+        <td>${t.findings ?? "-"}</td>
+        <td><button class="secondary" onclick="selectTask('${t.task_id}')">查看</button></td>
+      </tr>`).join("");
+  } catch (e) {
+    document.getElementById("scanMsg").textContent = "刷新失败: " + e.message;
+  }
+}
+
+async function startScan() {
+  const btn = document.getElementById("btnScan");
+  btn.disabled = true;
+  document.getElementById("scanMsg").textContent = "任务已提交，扫描中…";
+  try {
+    const resp = await api("/api/scans", { method: "POST" });
+    currentTask = resp.task_id;
+    pollTask();
+  } catch (e) {
+    document.getElementById("scanMsg").textContent = "发起失败: " + e.message;
+    btn.disabled = false;
+  }
+}
+
+async function pollTask() {
+  const id = currentTask;
+  try {
+    const data = await api(`/api/scans/${id}`);
+    await refreshAll();
+    const task = data.task;
+    if (task.status === "running" || task.status === "queued") {
+      setTimeout(pollTask, 1500);
+    } else if (task.status === "finished") {
+      document.getElementById("scanMsg").textContent =
+        `✅ 扫描完成：${data.result.success} 次攻击成功，${data.result.findings.length} 条漏洞`;
+      renderFindings(data.result.findings);
+      document.getElementById("btnReport").disabled = false;
+      document.getElementById("btnFix").disabled = false;
+      document.getElementById("btnScan").disabled = false;
+    } else {
+      document.getElementById("scanMsg").textContent = "❌ 扫描失败: " + (task.error || "");
+      document.getElementById("btnScan").disabled = false;
+    }
+  } catch (e) {
+    document.getElementById("scanMsg").textContent = "轮询失败: " + e.message;
+    document.getElementById("btnScan").disabled = false;
+  }
+}
+
+function renderFindings(findings) {
+  const tbody = document.querySelector("#findingTable tbody");
+  if (!findings.length) {
+    tbody.innerHTML = `<tr><td colspan="5" class="msg">未发现漏洞 ✅</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = findings.map((f, i) => `
+    <tr>
+      <td>${f.finding_id}</td><td>${f.category}</td>
+      <td>${sevTag(f.severity)}</td><td>${f.role}</td>
+      <td title="${f.evidence}">${f.fix_plan || "-"}</td>
+    </tr>`).join("");
+}
+
+async function selectTask(id) {
+  currentTask = id;
+  document.getElementById("btnReport").disabled = false;
+  document.getElementById("btnFix").disabled = false;
+  await loadReport();
+}
+
+async function loadReport() {
+  if (!currentTask) return;
+  try {
+    const resp = await fetch(`/api/scans/${currentTask}/report`);
+    if (!resp.ok) throw new Error(await resp.text());
+    document.getElementById("reportView").textContent = await resp.text();
+  } catch (e) {
+    document.getElementById("reportMsg").textContent = "报告加载失败: " + e.message;
+  }
+}
+
+async function runFix() {
+  if (!currentTask) return;
+  document.getElementById("btnFix").disabled = true;
+  document.getElementById("reportMsg").textContent = "蓝队修复中（方案→沙箱应用→回归验证）…";
+  try {
+    await api(`/api/scans/${currentTask}/fix`, { method: "POST" });
+    const resp = await fetch(`/api/scans/${currentTask}/remediation`);
+    if (resp.ok) {
+      document.getElementById("remediationView").textContent = await resp.text();
+      document.getElementById("reportMsg").textContent = "✅ 修复报告已生成";
+    }
+  } catch (e) {
+    document.getElementById("reportMsg").textContent = "修复失败: " + e.message;
+  }
+  document.getElementById("btnFix").disabled = false;
+}
+
+refreshAll();
+setInterval(refreshAll, 5000);
+</script>
+</body>
+</html>
