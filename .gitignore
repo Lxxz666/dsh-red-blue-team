@@ -19,6 +19,12 @@ examples/*.svg
 !examples/wanter_showcase.svg
 !examples/wanter_embedding_chart.svg
 
+# 测试与覆盖率产物
+*.log
+.coverage
+coverage.xml
+htmlcov/
+
 # 红蓝队运行产物（扫描数据库/审计/报告/靶场状态）
 *.db
 *.db-journal

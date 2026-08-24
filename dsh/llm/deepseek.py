@@ -76,10 +76,19 @@ class DeepSeekAdapter(LlmAdapter):
         payload["messages"].extend(messages_to_openai(request.messages))
         if request.tools:
             payload["tools"] = request.tool_schemas()
+            # 可选强制工具调用（tool_choice）：经 config.extra 传入（默认 None 不设置）。
+            tc = request.config.extra.get("tool_choice")
+            if tc:
+                payload["tool_choice"] = tc
         if request.config.max_tokens:
             payload["max_tokens"] = request.config.max_tokens
         if request.config.temperature is not None:
             payload["temperature"] = request.config.temperature
+        # 推理模型开关：火山方舟 deepseek-v4-flash 等默认只输出 reasoning_content
+        # （content 为空，agent loop 拿不到文本）。设 DEEPSEEK_DISABLE_THINKING=1
+        # 时附加 thinking disabled，让模型直接输出 content（agent 工具循环更连贯）。
+        if os.environ.get("DEEPSEEK_DISABLE_THINKING"):
+            payload["thinking"] = {"type": "disabled"}
         return payload
 
     def _parse_line(self, line: str) -> Optional[StreamChunk]:

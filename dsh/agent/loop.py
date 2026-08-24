@@ -447,6 +447,8 @@ class AgentLoopService(Service):
         if not model:
             model = "mock" if provider == "mock" else "deepseek-chat"
         # `is not None` 判断（`or` 会把合法的 0 值如 temperature=0 当未设置）
+        extra = dict(agent.options.get("extra") or {})
+        extra.update(defaults.get("extra") or {})
         return LlmCallConfig(
             provider=provider, model=model,
             max_tokens=(agent.options.get("max_tokens")
@@ -458,7 +460,8 @@ class AgentLoopService(Service):
             reasoning_effort=(agent.options.get("reasoning_effort")
                               if agent.options.get("reasoning_effort")
                               is not None
-                              else defaults.get("reasoning_effort")))
+                              else defaults.get("reasoning_effort")),
+            extra=extra)
 
     @staticmethod
     def _chunk_json(chunk: StreamChunk) -> Dict[str, Any]:
