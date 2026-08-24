@@ -29,6 +29,10 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-asyncio
 
+      - name: Install tomli fallback (Python 3.10)
+        if: matrix.python-version == '3.10'
+        run: pip install tomli
+
       - name: Run full test suite
         run: python -m pytest tests tests_redteam -q
 
