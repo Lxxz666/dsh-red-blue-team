@@ -27,7 +27,7 @@ pip install -e .                       # 可选：安装 dsh-redteam / dsh-pytho
 | `dsh-redteam scan --config scan.yml [--fix]` | 网址/文件夹扫描（主Agent+子Agent 编排） |
 | `dsh-redteam static <文件夹> [--scenario auto]` | 免配置快速静态扫描 |
 | `dsh-redteam fix --config scan.yml --scan ID [--dry-run]` | 蓝队：方案/沙箱应用/回归/**完整修复报告** |
-| `dsh-redteam lab [--port 8765] [--guards FILE]` | 启动内置靶场（37 个埋入漏洞） |
+| `dsh-redteam lab [--port 8765] [--guards FILE]` | 启动内置靶场（53 个埋入漏洞 · 12 大业务场景） |
 | `dsh-redteam report --config scan.yml [--list｜--scan ID]` | 历史扫描/重建报告 |
 | `dsh-redteam bench --config scan.yml` | 自适应优先级基准（随机基线 vs wanter 地形序） |
 | `dsh-redteam samples [list｜show CATEGORY]` | 攻击样本库（54 类别） |

@@ -175,14 +175,62 @@ class LabApp:
             return self._biz_tenant_data(match.group(1), role)
         if method == "POST" and route == "/api/billing/plan":
             return self._biz_plan(body)
+        # 社交
+        match = re.fullmatch(r"/api/posts/(\d+)", route)
+        if method == "GET" and match:
+            return self._biz_post(int(match.group(1)), role)
+        if method == "POST" and route == "/api/posts":
+            return self._biz_post_create(body)
+        # 医疗
+        match = re.fullmatch(r"/api/records/(\d+)", route)
+        if method == "GET" and match:
+            return self._biz_record(int(match.group(1)), role)
+        if method == "POST" and route == "/api/appointments":
+            return self._biz_appointment(body)
+        # 游戏
+        if method == "POST" and route == "/api/wallet/coins":
+            return self._biz_coins(body)
+        if method == "POST" and route == "/api/rewards/claim":
+            return self._biz_reward_claim(body)
+        # 外卖
+        if method == "POST" and route == "/api/orders/quote":
+            return self._biz_quote(body)
+        if method == "POST" and route == "/api/orders/confirm":
+            return self._biz_delivery_confirm(body)
+        # 招聘
+        match = re.fullmatch(r"/api/resumes/(\d+)", route)
+        if method == "GET" and match:
+            return self._biz_resume(int(match.group(1)), role)
+        if method == "POST" and route == "/api/interviews/schedule":
+            return self._biz_interview(body)
+        # 直播
+        if method == "POST" and route == "/api/live/gift":
+            return self._biz_gift(body)
+        match = re.fullmatch(r"/api/videos/([^/]+)/stream", route)
+        if method == "GET" and match:
+            return self._biz_video_stream(match.group(1))
+        # 会员
+        if method == "POST" and route == "/api/subscription/renew":
+            return self._biz_subscription(body)
+        if method == "POST" and route == "/api/points/task":
+            return self._biz_points_task(body)
+        # 政务
+        match = re.fullmatch(r"/api/cases/(\d+)/finish", route)
+        if method == "POST" and match:
+            return self._biz_case_finish(int(match.group(1)))
+        match = re.fullmatch(r"/api/citizens/(\d+)", route)
+        if method == "GET" and match:
+            return self._biz_citizen(int(match.group(1)), role)
         return None
 
     def _biz_meta(self) -> Dict[str, Any]:
         """业务面元信息（场景自动识别用）。"""
         return self._ok({"business": "ecommerce",
-                         "scenarios": ["ecommerce", "education",
-                                       "finance", "saas"],
-                         "version": "lab-1.1"})
+                         "scenarios": ["ecommerce", "education", "finance",
+                                       "saas", "social", "healthcare", "gaming",
+                                       "delivery", "hr", "media", "membership",
+                                       "government"],
+                         "version": "lab-1.2"})
 
     def _biz_checkout(self, body: Dict[str, Any]) -> Dict[str, Any]:
         amount = body.get("amount", "?")
@@ -292,6 +340,112 @@ class LabApp:
         if self.guards.plan_enforcement:
             return self._ok({"message": f"套餐已切换为 {plan}，高级功能已回收"})
         return self._ok({"message": f"套餐已切换为 {plan}，高级功能保留"})
+
+    # ---- 8 大业务场景端点（社交/医疗/游戏/外卖/招聘/直播/会员/政务） ----
+
+    def _biz_post(self, post_id: int, role: str) -> Dict[str, Any]:
+        # 帖子 1 公开（本人），帖子 2 私密（他人）——越权读私密内容
+        if self.guards.post_scope_check and post_id != 1 and role != "admin":
+            return self._error(403, {"error": "无权访问该帖子"})
+        visibility = "public" if post_id == 1 else "private"
+        return self._ok({"post_id": post_id, "visibility": visibility,
+                         "content": "帖子内容示例", "author": "user_2"
+                         if post_id == 2 else "user_1"})
+
+    def _biz_post_create(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        content = str(body.get("content", ""))
+        if self.guards.moderation_filter and \
+                re.search(r"违禁|违法|赌博|色情", content):
+            return self._ok({"error": "内容包含违禁词，已拦截"})
+        return self._ok({"message": "发布成功"})
+
+    def _biz_record(self, record_id: int, role: str) -> Dict[str, Any]:
+        if self.guards.record_scope_check and record_id != 1 and role != "admin":
+            return self._error(403, {"error": "无权访问该记录"})
+        return self._ok({"record_id": record_id, "patient": "张三",
+                         "diagnosis": "上呼吸道感染",
+                         "prescription": "阿莫西林 0.5g×12"})
+
+    def _biz_appointment(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        slot = str(body.get("slot", ""))
+        if self.guards.appointment_lock and slot in ("09:00", "09:30"):
+            return self._ok({"error": "号源已被占用"})
+        return self._ok({"message": "预约成功", "slot": slot,
+                         "doctor": body.get("doctor_id", "")})
+
+    def _biz_coins(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        coins = body.get("coins", "?")
+        if self.guards.game_currency_server_side:
+            return self._ok({"error": "金币不可由客户端修改"})
+        return self._ok({"message": f"金币已更新为 {coins}"})
+
+    def _biz_reward_claim(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        reward_id = str(body.get("reward_id", ""))
+        if self.guards.reward_idempotency:
+            return self._ok({"error": "该奖励已领取过"})
+        return self._ok({"message": "领取成功", "reward_id": reward_id})
+
+    def _biz_quote(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        fee = body.get("fee", "?")
+        if self.guards.fee_server_side:
+            return self._ok({"message": "运费按服务端计价：10 元"})
+        return self._ok({"message": f"运费已更新为 {fee} 元"})
+
+    def _biz_delivery_confirm(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        if self.guards.delivery_confirm_check:
+            return self._ok({"error": "送达确认需要骑手凭证"})
+        return self._ok({"message": "确认成功",
+                         "order_id": body.get("order_id", "")})
+
+    def _biz_resume(self, resume_id: int, role: str) -> Dict[str, Any]:
+        if self.guards.resume_scope_check and resume_id != 1 and role != "admin":
+            return self._error(403, {"error": "无权查看该信息"})
+        return self._ok({"resume_id": resume_id, "name": "李四",
+                         "phone": "13800000002", "education": "本科"})
+
+    def _biz_interview(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        stage = str(body.get("stage", ""))
+        if self.guards.interview_workflow and stage != "first":
+            return self._ok({"error": "面试流程未到该阶段"})
+        return self._ok({"message": f"已安排 {stage} 面试",
+                         "candidate_id": body.get("candidate_id", "")})
+
+    def _biz_gift(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        price = body.get("price", "?")
+        if self.guards.gift_price_server_side:
+            return self._ok({"message": "礼物价格以服务端为准：100 元"})
+        return self._ok({"message": f"打赏成功，金额 {price} 元",
+                         "streamer": body.get("streamer_id", "")})
+
+    def _biz_video_stream(self, video_id: str) -> Dict[str, Any]:
+        if self.guards.paywall_check and video_id == "v-9":
+            return self._error(403, {"error": "该视频需要订阅"})
+        return self._ok({"video_id": video_id,
+                         "stream_url": f"https://cdn.example.com/{video_id}.m3u8"})
+
+    def _biz_subscription(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        if self.guards.subscription_server_side:
+            return self._ok({"error": "试用次数已用完"})
+        return self._ok({"message": "试用已重置，有效期延长 7 天"})
+
+    def _biz_points_task(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        if self.guards.points_idempotency:
+            return self._ok({"error": "该任务已领取过"})
+        return self._ok({"message": "积分已发放 +100",
+                         "task_id": body.get("task_id", "")})
+
+    def _biz_case_finish(self, case_id: int) -> Dict[str, Any]:
+        if self.guards.workflow_state_machine:
+            return self._ok({"error": "流程未完成，无法办结"})
+        return self._ok({"message": "已办结", "case_id": case_id})
+
+    def _biz_citizen(self, citizen_id: int, role: str) -> Dict[str, Any]:
+        if self.guards.citizen_scope_check and citizen_id != 1 \
+                and role != "admin":
+            return self._error(403, {"error": "无权查询该公民信息"})
+        return self._ok({"citizen_id": citizen_id, "name": "张三",
+                         "id_number": "370102********1234",
+                         "address": "山东省济南市"})
 
     # ---- 漏洞端点 ----
 

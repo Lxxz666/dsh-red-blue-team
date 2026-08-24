@@ -7,7 +7,7 @@
 
 ![CI](https://github.com/Lxxz666/dsh-red-blue-team/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-342%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-353%20passed-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 **别的工具告诉你"哪里可能有问题"，dsh-red-blue-team 直接攻击给你看，然后修好它，再攻击一遍证明修好了。**
@@ -63,10 +63,10 @@ python -m redteam.cli bench --config examples/scan_lab.yaml
 
 | 指标 | 结果 | 说明 |
 |:--|:--|:--|
-| 埋入漏洞发现率 | **37/37 = 100%** | 内置靶场 37 个埋入漏洞（验收线 ≥80%），`test_scan_e2e` 每次 CI 强制 |
+| 埋入漏洞发现率 | **53/53 = 100%** | 内置靶场 53 个埋入漏洞（验收线 ≥80%），`test_scan_e2e` 每次 CI 强制 |
 | 误报率（全加固靶场复扫） | **0 命中** | 修复完成的靶场复扫必须清零，否则 CI 失败 |
 | 修复闭环 | **89 命中 → 89 修复 → 89 回归通过 → 复扫 0 命中** | 蓝队自动修复+回归验证，同一攻击重跑必须清零 |
-| 测试规模 | **342 passed**（框架 224 + 红蓝队 118） | 判定/靶场/场景/静态/多Agent/MCP/攻击链/Web面板/批扫/定时/回归全链路，GitHub Actions 双 Python 版本 |
+| 测试规模 | **353 passed**（框架 224 + 红蓝队 129） | 判定/靶场/场景/静态/多Agent/MCP/攻击链/Web面板/批扫/定时/回归全链路，GitHub Actions 双 Python 版本 |
 | 扫描确定性 | 两次扫描命中集合**完全一致** | 状态型样本串行通道+重置隔离，报告可复现审计 |
 | 自适应收益（wanter 地形） | 25% 预算下命中率 **+10.5%**，覆盖效率提速 **+9.0%** | bench 命令：随机基线 vs 地形序二次扫描对比 |
 | 检测面 | **71 条基础样本 × 54 个攻击类别** | D1 Web / D2 API / D3 LLM / D7 配置 + D19 业务场景 + MCP 工具面 |
@@ -140,10 +140,11 @@ Web 面板：dsh-redteam web（网页发起扫描/漏洞清单/报告/一键修�
 - **自适应**：复用 dsh.wanter 势能地形——成功攻击刻蚀河道（下次优先），失败淤积抬高（自动避开），跨目标按业务域分区
 - **合规红线**：非本地目标必须声明书面授权否则拒绝扫描；蓝队只改沙箱，绝不直改生产
 
-## 🏪 内置靶场（37 个埋入漏洞）
+## 🏪 内置靶场（53 个埋入漏洞）
 
-一个"故意埋雷"的弱防护电商客服 agent：LLM 注入/密钥泄露/工具滥用 × 电商/教育/金融/SaaS
-业务逻辑漏洞，全部由 `guards.yml` 驱动——**蓝队修复 = 收紧 guards → 回归证明清零**。
+一个"故意埋雷"的弱防护电商客服 agent：LLM 注入/密钥泄露/工具滥用 × **12 大业务场景**
+（电商/金融/教育/SaaS/社交/医疗/游戏/外卖/招聘/直播/会员/政务）业务逻辑漏洞，
+全部由 `guards.yml` 驱动——**蓝队修复 = 收紧 guards → 回归证明清零**。
 
 ## 📁 目录
 
@@ -153,9 +154,9 @@ dsh-red-blue-team/
 ├── redteam/             # 红蓝队层：agents(主/子Agent+攻击链) scenarios(12场景) static(代码审计)
 │                        #   vectors(样本库) detector(判定) blueteam(修复) reporter(报告) web(面板)
 │                        #   adaptive(wanter地形) adapters(http/sdk/mcp) engine storage audit runtime config models
-├── target_lab/          # 内置靶场（37 埋入漏洞 + 业务场景 API + 可修复 guards）
+├── target_lab/          # 内置靶场（53 埋入漏洞 + 12 大业务场景 API + 可修复 guards）
 ├── sample_bank/         # 71 条攻击样本（YAML，四大检测面 + 12 业务场景 + MCP 工具面 + 多轮链模板）
-├── tests/ + tests_redteam/  # 334 项测试（含发现率≥80%、零误报、回归清零、MCP/攻击链/Web 验收）
+├── tests/ + tests_redteam/  # 353 项测试（含发现率≥80%、零误报、回归清零、MCP/攻击链/Web 验收）
 ├── .github/workflows/   # GitHub Actions CI（双 Python 版本全量测试 + 靶场验收）
 ├── examples/  docs/     # 示例配置（网址/文件夹/MCP）/ 架构·用户·攻击目录·场景·合规文档
 └── README.md

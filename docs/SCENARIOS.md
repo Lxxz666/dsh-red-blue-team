@@ -14,14 +14,14 @@
 | 金融/支付/钱包 | finance | fin_negative_transfer / fin_overdraw / fin_balance_tamper | ✅ |
 | 教育/在线学习 | education | edu_score_idor / edu_answer_leak / edu_score_tamper / edu_exam_time | ✅ |
 | SaaS/多租户 | saas | saas_tenant_isolation / saas_plan_downgrade | ✅ |
-| 社交/社区 | social | soc_content_idor / soc_moderation_bypass | 样本库 |
-| 医疗/健康 | healthcare | med_record_idor / med_appointment_race | 样本库 |
-| 游戏/虚拟资产 | gaming | game_currency_tamper / game_item_dup | 样本库 |
-| 外卖/物流/出行 | delivery | dlv_fee_tamper / dlv_confirm_bypass | 样本库 |
-| 招聘/HR | hr | hr_resume_idor / hr_offer_bypass | 样本库 |
-| 内容/媒体/直播 | media | med_gift_amount / med_paywall_bypass | 样本库 |
-| 会员/订阅/积分 | membership | mem_subscription_bypass / mem_points_farm | 样本库 |
-| 政务/公共服务 | government | gov_workflow_jump / gov_data_idor | 样本库 |
+| 社交/社区 | social | soc_content_idor / soc_moderation_bypass | ✅ |
+| 医疗/健康 | healthcare | med_record_idor / med_appointment_race | ✅ |
+| 游戏/虚拟资产 | gaming | game_currency_tamper / game_item_dup | ✅ |
+| 外卖/物流/出行 | delivery | dlv_fee_tamper / dlv_confirm_bypass | ✅ |
+| 招聘/HR | hr | hr_resume_idor / hr_offer_bypass | ✅ |
+| 内容/媒体/直播 | media | med_gift_amount / med_paywall_bypass | ✅ |
+| 会员/订阅/积分 | membership | mem_subscription_bypass / mem_points_farm | ✅ |
+| 政务/公共服务 | government | gov_workflow_jump / gov_data_idor | ✅ |
 
 ## 场景 × 攻击点明细（源自 WSTG-BUSL 方法论）
 

@@ -60,6 +60,23 @@ class GuardConfig:
     balance_server_side: bool = False      # 金融：余额服务端记账
     tenant_isolation: bool = False         # SaaS：租户数据隔离
     plan_enforcement: bool = False         # SaaS：降级权益回收
+    # ---- 其余 8 大业务场景防护 ----
+    post_scope_check: bool = False         # 社交：帖子可见性/属主校验
+    moderation_filter: bool = False        # 社交：内容审核过滤
+    record_scope_check: bool = False       # 医疗：病历属主校验
+    appointment_lock: bool = False         # 医疗：号源锁
+    game_currency_server_side: bool = False  # 游戏：货币服务端记账
+    reward_idempotency: bool = False       # 游戏：道具领取幂等
+    fee_server_side: bool = False          # 外卖：配送费服务端计价
+    delivery_confirm_check: bool = False   # 外卖：送达确认校验
+    resume_scope_check: bool = False       # 招聘：简历查看鉴权
+    interview_workflow: bool = False       # 招聘：面试流程状态机
+    gift_price_server_side: bool = False   # 直播：打赏价格服务端定价
+    paywall_check: bool = False            # 直播：付费内容鉴权
+    subscription_server_side: bool = False  # 会员：订阅周期服务端控制
+    points_idempotency: bool = False       # 会员：积分获取幂等
+    workflow_state_machine: bool = False   # 政务：办事流程状态机
+    citizen_scope_check: bool = False      # 政务：公民数据属主校验
 
     def with_defaults(self) -> "GuardConfig":
         return self
@@ -81,7 +98,15 @@ HARDENED_GUARDS = GuardConfig(
     score_scope_check=True, answer_leak_guard=True, score_server_grade=True,
     exam_time_check=True, amount_validation=True,
     withdraw_limit_check=True, balance_server_side=True,
-    tenant_isolation=True, plan_enforcement=True)
+    tenant_isolation=True, plan_enforcement=True,
+    post_scope_check=True, moderation_filter=True,
+    record_scope_check=True, appointment_lock=True,
+    game_currency_server_side=True, reward_idempotency=True,
+    fee_server_side=True, delivery_confirm_check=True,
+    resume_scope_check=True, interview_workflow=True,
+    gift_price_server_side=True, paywall_check=True,
+    subscription_server_side=True, points_idempotency=True,
+    workflow_state_machine=True, citizen_scope_check=True)
 
 
 def load_guards(path: str) -> GuardConfig:
