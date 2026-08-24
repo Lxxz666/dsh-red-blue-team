@@ -822,13 +822,19 @@ def cmd_web(args: argparse.Namespace) -> None:
                 "out_dir": os.path.join(out_dir, "reports"),
                 "engine": {"concurrency": 4, "min_interval_ms": 5},
             })
-    from .web.panel import create_app
+    from .web.panel import _llm_available, create_app
     app = create_app(cfg, runtime_dir, lab=lab)
     import uvicorn
     print(f"🔴🔵 dsh-red-blue-team Web 面板: http://{args.host}:{args.port}")
     print(f"   默认目标: {cfg.target.name}（{cfg.target.base_url or cfg.target.folder_path}）")
     print(f"   面板支持: 输入任意网址扫描 / 上传项目 ZIP 解析 / 任务步骤与日志追踪")
-    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+    if _llm_available():
+        print(f"   LLM: 已就绪（{os.environ.get('DEEPSEEK_MODEL', 'DeepSeek')}）"
+              f"——自主攻击/主动侦察/修复建议开关可用")
+    else:
+        print("   LLM: 未配置（仅确定性引擎，LLM 开关自动禁用）")
+    # info 级日志：控制台实时显示每次 API 请求与任务日志（排查面板问题时可见）
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 
 
 if __name__ == "__main__":

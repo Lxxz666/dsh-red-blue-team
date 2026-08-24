@@ -372,6 +372,7 @@ const state = {
   tab: "steps",
   reportLoaded: null,  // 缓存 {key, html}
   llmAvailable: false,
+  defaultTarget: "",
   pollTimer: null,
 };
 
@@ -545,6 +546,7 @@ function renderDetail(d) {
   $("detailBody").style.display = "block";
   $("dName").textContent = task.name;
   $("dStatus").innerHTML = taskStatusHtml(task);
+  updateTargetBadge(task);
   const targetLine = task.target ? `目标：<b>${esc(task.target)}</b>　` : "";
   const scanLine = task.scan_id ? `扫描编号：<b>${esc(task.scan_id)}</b>　` : "";
   const timeLine = task.started_at
@@ -738,12 +740,6 @@ async function tick() {
   const anyRunning = tasks.some((t) => t.status === "running" || t.status === "queued");
   if (sel) {
     await loadDetail();
-    if (sel.status === "finished") {
-      const current = state.tasks.find((t) => t.task_id === state.selected);
-      if (current && (current.error || current.status === "finished") && state.reportLoaded === null) {
-        /* 不自动打开报告，等用户点击 */
-      }
-    }
   }
   if (anyRunning || (sel && sel.status === "running")) return 1200;
   return 3000;
@@ -755,29 +751,53 @@ async function loop() {
   state.pollTimer = setTimeout(loop, delay);
 }
 
+/* ---------- 顶栏徽标 ---------- */
+function updateTargetBadge(task) {
+  const badge = $("targetBadge");
+  if (task) {
+    badge.innerHTML = "任务: <b>" + esc(task.name) + "</b>" +
+      (task.target ? " ｜ " + esc(String(task.target).slice(0, 48)) : "");
+  } else {
+    badge.textContent = "目标: " + (state.defaultTarget || "—");
+  }
+}
+
 /* ---------- 初始化 ---------- */
 async function init() {
-  try {
-    const cfg = await api("/api/config");
-    state.llmAvailable = !!cfg.llm_available;
-    $("targetBadge").textContent = `目标: ${cfg.target}（${cfg.type}）`;
-  } catch {}
-  if (state.llmAvailable) {
-    $("llmBadge").classList.add("on");
-    $("llmBadge").innerHTML = '<span class="dot"></span>LLM 已就绪（' +
-      esc(cfg.llm_model || "DeepSeek") + '）';
-  } else {
-    $("llmBadge").innerHTML = '<span class="dot"></span>LLM 未配置（仅确定性引擎）';
-    ["tgAgent", "tgExplorer", "tgFixPlan"].forEach((id) => {
-      $(id).classList.add("disabled");
-      $(id.replace("tg", "opt")).checked = false;
-    });
-  }
+  // ① 先绑定交互（不依赖任何配置，保证按钮始终可用）
   $("btnStart").addEventListener("click", startUrlTask);
   $("btnUpload").addEventListener("click", uploadProject);
   $("btnReport").addEventListener("click", loadReport);
   $("btnRemediation").addEventListener("click", loadRemediation);
   $("btnFix").addEventListener("click", fixNow);
+
+  // ② 加载配置（LLM 可用性 + 默认目标名）
+  let cfg = null;
+  try {
+    cfg = await api("/api/config");
+  } catch (e) {
+    toast("无法连接面板后端（/api/config）: " + e.message, "err");
+  }
+  if (cfg) {
+    state.llmAvailable = !!cfg.llm_available;
+    state.defaultTarget = cfg.target + "（" + cfg.type + "）";
+    if (state.llmAvailable) {
+      $("llmBadge").classList.add("on");
+      $("llmBadge").innerHTML = '<span class="dot"></span>LLM 已就绪（' +
+        esc(cfg.llm_model || "DeepSeek") + '）';
+    } else {
+      $("llmBadge").innerHTML = '<span class="dot"></span>LLM 未配置（仅确定性引擎）';
+      ["tgAgent", "tgExplorer", "tgFixPlan"].forEach((id) => {
+        $(id).classList.add("disabled");
+        $(id.replace("tg", "opt")).checked = false;
+      });
+    }
+  } else {
+    $("llmBadge").innerHTML = '<span class="dot"></span>LLM 状态未知';
+  }
+  updateTargetBadge(null);
+
+  // ③ 任务列表 + 轮询
   await refreshTasks();
   loop();
 }
