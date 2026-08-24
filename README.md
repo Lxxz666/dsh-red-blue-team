@@ -110,7 +110,7 @@ requirements.txt:1  🟠 django==3.2.20 命中 CVE-lite 已知漏洞区间
 | 🧪 测试规模 | **371 passed**（框架 224 + 红蓝队 147） | 全链路覆盖，GitHub Actions 双 Python 版本 |
 | 🎲 扫描确定性 | **两次扫描命中集合完全一致** | 状态型样本串行通道+重置隔离，报告可复现审计 |
 | 🧠 自适应收益（wanter 地形） | 25% 预算下命中率 **+10.5%**，覆盖效率 **+9.0%** | bench 命令：随机基线 vs 地形序二次扫描对比 |
-| 🤖 LLM 自主攻击（实测） | 单轮 **100 次自主攻击 · 37 漏洞命中 · 18 攻击类别** | `engine.llm_agent: true` + DeepSeek 密钥，确定性多轮循环驱动（上限可配） |
+| 🤖 LLM 自主攻击（实测） | 单轮 **100 次自主攻击 · 37 漏洞命中 · 18 攻击类别** | `engine.llm_agent: true` + DeepSeek 密钥；**并行 Agent（默认 2）× 每轮批量 3~5 个工具调用**，LLM 阶段 240s+ → **14s**；过程流式可见（决策轮/工具调用/攻击判定逐条实时日志） |
 | 🔎 LLM 主动侦察 | **http_probe / http_attack 原始探测工具** | 不限于预定义场景：LLM 自主探测任意路径/方法，判定仍走确定性信号管线 |
 | 🧠 LLM 修复建议 | **每条漏洞生成 AI 修复方案** | `engine.llm_fix_plan: true`，呈现在修复报告「🤖 AI 修复建议」节，无 LLM 自动降级 |
 | 🗺️ 检测面 | **71 条基础样本 × 62 个攻击类别** | D1 Web / D2 API / D3 LLM / D7 配置 + D19 业务场景 + MCP 工具面 |
@@ -133,7 +133,8 @@ AttackOrchestrator（主 Agent）
   │     attacker-student   ─┐
   │     attacker-customer  ─┼─ WorkerReport{判定/证据} ─┐
   │     attacker-admin     ─┘                           │
-  ├─④b LLM 自主攻击 Agent（确定性多轮循环，可选 http_probe/http_attack 主动侦察）│
+  ├─④b LLM 自主攻击 Agent ×N 并行（确定性多轮循环 + 批量工具调用 + 流式日志，
+  │     可选 http_probe/http_attack 主动侦察）
   ├─⑤ 主Agent汇总 → 漏洞落库 → 攻击报告（含态势综述）◀──┘
   ▼
 BlueEngine（蓝队）：68 类修复模板 [+ LLM 修复建议] → 沙箱应用 → 回归清零 → 完整修复报告
@@ -236,7 +237,7 @@ dsh-red-blue-team/
 | V10 | 定时扫描 + 多目标批扫 + 静态规则扩至 21 条 |
 | V11 | LLM 自主攻击 Agent：**确定性多轮驱动循环**（每轮强制工具调用，持续攻击至预算/超时） |
 | V12 | Webhook 报告推送（钉钉/企微/邮件网关） |
-| V13 | Web 面板 v2（网址输入/源码上传、任务步骤时间线+实时日志、LLM 模式开关） + LLM 主动侦察工具（http_probe/http_attack）+ LLM 逐条修复建议 |
+| V13 | Web 面板 v2（网址输入/源码上传、任务步骤时间线+实时日志、LLM 模式开关） + LLM 主动侦察工具（http_probe/http_attack）+ LLM 逐条修复建议 + LLM 攻击过程流式输出与并行提速 |
 
 **红队（多检测面×多场景×多Agent×LLM 自主）→ 蓝队（修复-回归-报告）→ 产品化（Web/批扫/定时/推送/CI）闭环全部落地。**
 

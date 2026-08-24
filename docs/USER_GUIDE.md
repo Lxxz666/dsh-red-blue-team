@@ -119,28 +119,37 @@ vectors:
 ```yaml
 engine:
   llm_agent: true                  # LLM 自主攻击（确定性多轮驱动循环）
-  llm_agent_max_attacks: 100       # 攻击次数上限（默认 100，可调大）
-  llm_agent_timeout_s: 600         # 循环总超时
+  llm_agent_max_attacks: 100       # 攻击次数上限（默认 100；并行 Agent 间均分）
+  llm_agent_timeout_s: 600         # 单个 Agent 循环总超时
+  llm_agent_parallel: 2            # 并行 LLM 攻击 Agent 数（各负责一批类别，默认 2）
+  llm_agent_max_tokens: 800        # 每轮 LLM 输出窗口（允许一轮批量 3~5 个工具调用）
 ```
 
-开启后（需 `DEEPSEEK_API_KEY`），扫描首轮结束后主 Agent 派发 **LLM 自主攻击
+开启后（需 `DEEPSEEK_API_KEY`），扫描首轮结束后主 Agent 派发 **N 个并行 LLM 自主攻击
 Agent**。核心是**确定性多轮驱动循环**——不依赖模型"自觉持续攻击"（多数模型
 常攻击 1~4 次就输出文本收尾），而是每轮强制模型给出下一步：
 
 ```
-循环（直到 finalize / 100 次攻击上限 / 超时）：
+循环（直到 finalize / 攻击预算 / 轮次·工具预算 / 超时）：
   ① LLM 调用（tools + tool_choice=required，必须给下一步）；
   ② 解析：attack_vector → 执行真实攻击 + 确定性判定 → 记录，
      结果以文本历史回喂 LLM；finalize_report → 记录报告并结束；
-  ③ 历史持续累积，模型每次决策基于全部攻击历史。
+  ③ 历史持续累积（超过 30 条自动压缩摘要，防止每轮延迟线性增长）。
 ```
 
+- **提速**（并行 × 批量 × 早停）：
+  - `llm_agent_parallel` 个 Agent 并行攻击，攻击类别轮转分桶、互不重复；
+    状态型攻击跨 Agent 共享串行锁（防数据污染），攻击预算在 Agent 间均分；
+  - 每轮一次批量返回 3~5 个工具调用（`llm_agent_max_tokens` 窗口），
+    大幅减少 API 往返——实测 LLM 阶段从 240s+ 降到 **14s** 量级；
+  - 连续 12 次攻击失败（覆盖饱和）或轮次/工具预算耗尽 → 提前收尾；
+  - `http_probe` 侦察每个 Agent 最多 10 次（防只猜路径不攻击拖慢扫描）；
+- **过程流式可见（非黑盒）**：每次 LLM 调用/决策/攻击判定实时广播事件——
+  `agent/dispatched` 启动派发 → `llm/turn` 决策轮 → `llm/output` 模型文本流 →
+  `llm/tool` 工具调用 → `attack/executed`/`attack/verdict` 攻击执行与判定 →
+  `llm/stop` 收尾原因——Web 面板日志控制台逐条滚动，CLI 控制台同步输出；
 - **参考攻击手法注入**：mission 自动注入样本库代表载荷（每类别一条），
   让模型模仿构造手法生成针对性变体载荷；
-- **实测**：单轮 **100 次自主攻击 · 37 漏洞命中 · 覆盖 18 个攻击类别**
-  （sensitive_data/indirect_injection/prompt_extraction/tool_abuse/
-  direct_injection/secret_leak…）；
-- 攻击上限可经 `engine.llm_agent_max_attacks` 调整（默认 100，可继续调大）；
 - 判定仍走确定性管线（LLM 无法"自我判定成功"）；无 LLM 时优雅降级为空操作。
 
 ### LLM 主动侦察工具（V13，opt-in）
@@ -153,7 +162,8 @@ engine:
 
 开启后 LLM 自主攻击 Agent 额外拥有两个工具：
 
-- `http_probe`：GET 任意路径，返回状态码/关键响应头/响应截断（侦察用，不落判定）；
+- `http_probe`：GET 任意路径，返回状态码/关键响应头/响应截断（侦察用，不落判定；
+  每 Agent 最多 10 次，配额用尽强制转攻击，防只猜路径拖慢扫描）；
 - `http_attack`：对任意方法/路径/载荷发起原始 HTTP 请求（JSON body 自动识别），
   判定仍走确定性信号管线（敏感泄露模式 / 服务端异常）。
 

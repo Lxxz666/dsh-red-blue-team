@@ -89,6 +89,7 @@ async def test_orchestrator_llm_agent_integration(vuln_lab, tmp_path,
     lab, guards_file = vuln_lab
     cfg = make_config(lab, guards_file, tmp_path)
     cfg.engine.llm_agent = True
+    cfg.engine.llm_agent_parallel = 1   # 单 Agent：断言确定性合并语义
     cfg.vectors.categories = ["direct_injection"]
     runtime = RedTeamRuntime(cfg)
     await runtime.start()
@@ -149,6 +150,110 @@ async def test_orchestrator_llm_agent_off_by_default(vuln_lab, tmp_path):
             runtime, cfg, adapter, scan_mode="llm-agent-off").run()
         assert not any(v.sample_uid.startswith("llm-agent-")
                        for v in result.verdicts)
+    finally:
+        if adapter is not None:
+            await adapter.close()
+        await runtime.close()
+
+
+async def test_orchestrator_llm_agent_parallel_merge(vuln_lab, tmp_path,
+                                                    monkeypatch):
+    """并行 LLM 攻击 Agent：按类别分桶派发，判定/漏洞合并入主扫描。"""
+    from redteam.agents import AttackOrchestrator
+    from redteam.agents.llm_agent import LlmAgentResult
+    from redteam.engine import build_adapter
+    from redteam.models import ConcreteSample, VerdictResult
+    from redteam.runtime import RedTeamRuntime
+
+    lab, guards_file = vuln_lab
+    cfg = make_config(lab, guards_file, tmp_path)
+    cfg.engine.llm_agent = True
+    cfg.engine.llm_agent_parallel = 2
+    cfg.engine.llm_agent_max_attacks = 10
+    cfg.vectors.categories = ["direct_injection"]
+    runtime = RedTeamRuntime(cfg)
+    await runtime.start()
+    adapter = None
+    try:
+        adapter = build_adapter(cfg)
+        registry = runtime.registry
+        base_by_category = {
+            "direct_injection": registry.sample_by_id("di-001"),
+            "secret_leak": registry.sample_by_id("sl-001")}
+        seen_agents: set = set()
+
+        async def fake_run(self):
+            seen_agents.add(self.agent_id)
+            category = ("direct_injection" if self.agent_id == "llm-attacker"
+                        else "secret_leak")
+            sample = ConcreteSample(
+                uid=f"llm-agent-{category}-0", sample=base_by_category[category],
+                role="student", payload=f"{self.agent_id} 的载荷",
+                variant_index=990, variant_of="llm-agent")
+            verdict = VerdictResult(
+                sample_uid=sample.uid, category=category,
+                role="student", verdict="success", confidence=0.9,
+                evidence=f"{self.agent_id} 命中")
+            return LlmAgentResult(
+                verdicts=[verdict], samples=[sample],
+                final_report=f"{self.agent_id} 报告", skipped=False,
+                agent_id=self.agent_id)
+
+        monkeypatch.setattr(
+            "redteam.agents.llm_agent.LlmAttackAgent.run", fake_run)
+        result = await AttackOrchestrator(
+            runtime, cfg, adapter,
+            scan_mode="llm-agent-parallel").run()
+        assert seen_agents == {"llm-attacker", "llm-attacker-2"}, \
+            f"应并行派发 2 个分工 Agent，实际: {seen_agents}"
+        llm_verdicts = [v for v in result.verdicts
+                        if v.sample_uid.startswith("llm-agent-")]
+        assert len(llm_verdicts) == 2, "两个 Agent 的判定都应并入"
+        categories = {f.category for f in result.findings
+                      if f.sample_uid.startswith("llm-agent-")}
+        assert categories == {"direct_injection", "secret_leak"}
+        # 两份最终报告合并进态势综述
+        report_text = open(result.report_path, encoding="utf-8").read()
+        assert "LLM 自主攻击 Agent 报告" in report_text
+        assert "llm-attacker 报告" in report_text
+        assert "llm-attacker-2 报告" in report_text
+    finally:
+        if adapter is not None:
+            await adapter.close()
+        await runtime.close()
+
+
+async def test_llm_agent_streams_events(vuln_lab, tmp_path):
+    """过程可见性：每轮决策/工具调用/攻击判定/启动派发都实时广播事件。"""
+    from redteam.engine import build_adapter
+    from redteam.runtime import RedTeamRuntime
+
+    lab, guards_file = vuln_lab
+    cfg = make_config(lab, guards_file, tmp_path)
+    runtime = RedTeamRuntime(cfg)
+    await runtime.start()
+    adapter = None
+    try:
+        adapter = build_adapter(cfg)
+        events: list = []
+        for name in ("agent/dispatched", "llm/turn", "llm/tool",
+                     "attack/executed", "attack/verdict", "agent/report"):
+            runtime.ctx.on(name, lambda payload=None, _n=name:
+                           events.append((_n, payload)))
+        agent = LlmAttackAgent(runtime, cfg, adapter, "摘要",
+                               script=_SCRIPT, agent_id="llm-attacker")
+        result = await agent.run()
+        assert not result.skipped
+        assert result.turns >= 1
+        assert any(n == "agent/dispatched" and
+                   p.get("agent") == "llm-attacker"
+                   for n, p in events), "启动即广播派发事件（Web 日志立即可见）"
+        assert any(n == "llm/turn" and p.get("calls") >= 1
+                   for n, p in events), "每轮决策应广播 llm/turn"
+        assert any(n == "llm/tool" and p.get("tool") == "attack_vector"
+                   for n, p in events), "每次工具调用应广播 llm/tool"
+        assert any(n == "attack/executed" for n, _ in events)
+        assert any(n == "attack/verdict" for n, _ in events)
     finally:
         if adapter is not None:
             await adapter.close()

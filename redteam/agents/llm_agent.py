@@ -29,7 +29,7 @@ from dsh.llm.adapters import LlmCallConfig, LlmRequest
 from dsh.llm.messages import Message
 
 from ..config import ScanConfig
-from ..models import ConcreteSample, VerdictResult
+from ..models import ConcreteSample, Verdict, VerdictResult
 from ..runtime import RedTeamRuntime
 
 log = logging.getLogger("redteam.agents.llm")
@@ -37,6 +37,9 @@ log = logging.getLogger("redteam.agents.llm")
 MAX_LLM_ATTACKS = 100         # LLM 自主攻击次数上限（默认；可经 engine.llm_agent_max_attacks 调大）
 DEFAULT_TIMEOUT_S = 600.0     # agent 循环总超时
 MAX_SILENT_TURNS = 2          # 连续无工具调用的轮次上限（防止死循环）
+MAX_CONSECUTIVE_FAILS = 12    # 连续失败攻击数上限（覆盖趋近饱和 → 提前收尾提速）
+MAX_PROBES = 10               # 每个 Agent 侦察（http_probe）次数上限（防止只猜路径不攻击）
+STREAM_INTERVAL_S = 0.4       # LLM 文本流式事件节流间隔（Web 日志可见，不刷屏）
 
 
 @dataclass
@@ -47,6 +50,7 @@ class LlmAgentResult:
     final_report: str = ""
     turns: int = 0
     skipped: bool = False       # 无 LLM/超时 → 优雅降级
+    agent_id: str = "llm-attacker"
 
     def to_json(self) -> Dict[str, Any]:
         return {"attacks": len(self.verdicts),
@@ -61,12 +65,20 @@ class LlmAttackAgent:
     :param adapter: 目标适配器（真实攻击经由它）。
     :param scan_summary: 扫描摘要（LLM 的决策依据）。
     :param script: 测试注入的 LLM 脚本（MockAdapter script），生产为 None。
+    :param agent_id: 并行攻击 Agent 的编号（llm-attacker / llm-attacker-2 …）。
+    :param mission_hint: 该 Agent 优先负责的攻击类别（并行分工）。
+    :param side_lock: 共享串行锁（状态型攻击跨并行 Agent 互斥）。
+    :param max_attacks: 覆盖 engine.llm_agent_max_attacks（并行预算均分用）。
     """
 
     def __init__(self, runtime: RedTeamRuntime, cfg: ScanConfig,
                  adapter: Any, scan_summary: str,
                  scan_id: str = "", script: Optional[List[Dict[str, Any]]] = None,
-                 timeout_s: float = DEFAULT_TIMEOUT_S) -> None:
+                 timeout_s: float = DEFAULT_TIMEOUT_S,
+                 agent_id: str = "llm-attacker",
+                 mission_hint: str = "",
+                 side_lock: Optional[asyncio.Lock] = None,
+                 max_attacks: Optional[int] = None) -> None:
         self.runtime = runtime
         self.cfg = cfg
         self.adapter = adapter
@@ -74,15 +86,26 @@ class LlmAttackAgent:
         self.scan_id = scan_id
         self.script = script
         self.timeout_s = timeout_s
-        # 攻击上限：配置项优先（engine.llm_agent_max_attacks），默认 100
+        self.agent_id = agent_id
+        self.mission_hint = mission_hint
+        self.side_lock = side_lock
+        # 攻击上限：参数 > 配置项 engine.llm_agent_max_attacks > 默认 100
         self.max_attacks = max(
-            1, int(getattr(cfg.engine, "llm_agent_max_attacks",
-                           MAX_LLM_ATTACKS)))
+            1, int(max_attacks or getattr(cfg.engine, "llm_agent_max_attacks",
+                                          MAX_LLM_ATTACKS)))
         self.attacks: List[ConcreteSample] = []
         self.verdicts: List[VerdictResult] = []
         self.final_report = ""
         self.skipped = False
         self._turns = 0
+        self._consecutive_fails = 0
+        self._probes = 0
+        self._tool_calls_total = 0
+        self._stop_reason = ""
+        # 过程预算（防模型只侦察不攻击 → 拖慢整体扫描）：
+        # 轮次上限 ≥8 且 ≥攻击预算；工具调用总量上限 = 攻击预算 × 4
+        self.max_turns = max(8, self.max_attacks)
+        self.max_tool_calls = self.max_attacks * 4
 
     # ---- 主流程：确定性多轮驱动循环 ----
 
@@ -90,21 +113,28 @@ class LlmAttackAgent:
         llm = self._setup_llm()
         if llm is None:
             self.skipped = True
-            return LlmAgentResult(skipped=True)
+            return LlmAgentResult(skipped=True, agent_id=self.agent_id)
+        # 启动即广播：Web 面板日志立刻可见（不再等到全部跑完才出现）
+        self.runtime.ctx.emit("agent/dispatched", {
+            "agent": self.agent_id, "label": f"LLM 自主攻击[{self.agent_id}]",
+            "task": f"LLM 自主攻击（预算 {self.max_attacks} 次）"})
         try:
             await asyncio.wait_for(self._loop(llm), timeout=self.timeout_s)
         except asyncio.TimeoutError:
-            log.warning("LLM 攻击 Agent 超时（%.0fs），按已执行攻击收敛",
-                        self.timeout_s)
+            self._stop_reason = "超时收敛"
+            log.warning("LLM 攻击 Agent[%s] 超时（%.0fs），按已执行攻击收敛",
+                        self.agent_id, self.timeout_s)
         self.runtime.ctx.emit("agent/report", {
-            "agent": "llm-attacker", "label": "LLM 自主攻击 Agent",
+            "agent": self.agent_id, "label": f"LLM 自主攻击[{self.agent_id}]",
             "task_type": "llm-agent", "extra": {
                 "attacks": len(self.verdicts),
-                "final_report": self.final_report}})
+                "final_report": self.final_report,
+                "stop_reason": self._stop_reason}})
         return LlmAgentResult(verdicts=list(self.verdicts),
                               samples=list(self.attacks),
                               final_report=self.final_report,
-                              turns=self._turns, skipped=False)
+                              turns=self._turns, skipped=False,
+                              agent_id=self.agent_id)
 
     def _setup_llm(self) -> Any:
         """装配 LLM：测试注入 script mock；生产注册 DeepSeek（读 .env）。"""
@@ -126,41 +156,69 @@ class LlmAttackAgent:
         start = time.time()
 
         while (len(self.verdicts) < self.max_attacks
+                and self._turns < self.max_turns
+                and self._tool_calls_total < self.max_tool_calls
                 and time.time() - start < self.timeout_s
                 and not self.final_report):
             self._turns += 1
             text, calls = await self._llm_call(llm, messages, system)
+            # 每轮决策广播：Web 日志实时可见（轮次/工具数/模型输出）
+            self.runtime.ctx.emit("llm/turn", {
+                "agent": self.agent_id, "turn": self._turns,
+                "calls": len(calls), "text": text[:200]})
             if not calls:
                 # 模型只输出文本（想收尾）：记入历史，给一次继续机会
                 silent_turns += 1
                 messages.append(Message.user(
                     (text or "请继续攻击或调用 finalize_report 收尾")[:400]))
                 if silent_turns >= MAX_SILENT_TURNS:
+                    self._stop_reason = "模型连续输出文本收尾"
                     break
                 continue
             silent_turns = 0
             for name, args in calls:
                 if self.final_report:
                     break
+                # 工具调用广播：模型每决定一次攻击/侦察都推给日志
+                self.runtime.ctx.emit("llm/tool", {
+                    "agent": self.agent_id, "tool": name,
+                    "args": str(args)[:160]})
                 if name == "attack_vector":
                     verdict = await self._execute_attack(args)
                     if verdict is not None:
+                        self._tool_calls_total += 1
+                        self._track_fail(verdict)
                         messages.append(Message.user(
                             f"[攻击#{len(self.verdicts)}] {verdict.category} → "
                             f"{verdict.verdict} ｜ 证据: {verdict.evidence[:140]}。"
                             f"继续攻击新的类别/路径/载荷变体；"
+                            f"下一轮一次批量给出 3~5 个不同类别的攻击调用；"
                             f"全部完成后调用 finalize_report 提交总结。"))
                 elif name == "http_probe":
+                    self._tool_calls_total += 1
+                    if self._probes >= MAX_PROBES:
+                        # 侦察配额用尽：强制转攻击，防止只猜路径拖慢扫描
+                        messages.append(Message.user(
+                            f"[侦察配额] 已用 {self._probes}/{MAX_PROBES} 次，"
+                            f"侦察结束。必须立即用 attack_vector / http_attack "
+                            f"发起攻击，不要再探测路径。"))
+                        continue
+                    self._probes += 1
                     probe_text = await self._execute_http_probe(args)
                     messages.append(Message.user(
-                        f"[侦察] {probe_text[:300]}。基于结果继续侦察或攻击。"))
+                        f"[侦察{self._probes}/{MAX_PROBES}] {probe_text[:300]}。"
+                        f"侦察仅剩 {MAX_PROBES - self._probes} 次，"
+                        f"尽快转为攻击。"))
                 elif name == "http_attack":
                     verdict = await self._execute_http_attack(args)
                     if verdict is not None:
+                        self._tool_calls_total += 1
+                        self._track_fail(verdict)
                         messages.append(Message.user(
                             f"[主动攻击#{len(self.verdicts)}] {verdict.verdict}"
                             f" ｜ 证据: {verdict.evidence[:140]}。"
                             f"失败就换路径/载荷，成功就深入同类攻击面；"
+                            f"下一轮一次批量给出 3~5 个攻击/侦察调用；"
                             f"全部完成后调用 finalize_report 提交总结。"))
                 elif name == "finalize_report":
                     try:
@@ -169,23 +227,73 @@ class LlmAttackAgent:
                             parsed.get("summary", "") or args or "")[:3000]
                     except (ValueError, TypeError):
                         self.final_report = str(args)[:3000]
+            if self._consecutive_fails >= MAX_CONSECUTIVE_FAILS:
+                self._stop_reason = (f"连续 {self._consecutive_fails} 次攻击失败，"
+                                     f"覆盖趋近饱和提前收尾")
+                self.runtime.ctx.emit("llm/stop", {
+                    "agent": self.agent_id,
+                    "reason": self._stop_reason})
+                break
+            self._compact_history(messages)
+        if not self.final_report and not self._stop_reason:
+            if self._turns >= self.max_turns:
+                self._stop_reason = f"轮次预算耗尽（{self.max_turns} 轮）"
+            elif self._tool_calls_total >= self.max_tool_calls:
+                self._stop_reason = (f"工具调用预算耗尽"
+                                     f"（{self.max_tool_calls} 次）")
+            if self._stop_reason:
+                self.runtime.ctx.emit("llm/stop", {
+                    "agent": self.agent_id, "reason": self._stop_reason})
+
+    def _track_fail(self, verdict: VerdictResult) -> None:
+        """连续失败计数（覆盖饱和 → 提前收尾提速）。"""
+        if verdict.verdict == Verdict.SUCCESS.value:
+            self._consecutive_fails = 0
+        elif verdict.verdict == Verdict.FAILED.value:
+            self._consecutive_fails += 1
+
+    def _compact_history(self, messages: List[Message]) -> None:
+        """历史压缩：上下文只保留任务 + 最近 12 条结果，防止每轮延迟随历史线性增长。"""
+        if len(messages) <= 30:
+            return
+        done, hit = len(self.verdicts), sum(
+            1 for v in self.verdicts if v.success)
+        summary = (f"[历史压缩] 此前已执行 {done} 次攻击，命中 {hit} 次；"
+                   f"未命中的类别/载荷无需重复，继续攻击剩余攻击面。")
+        messages[1:-12] = [Message.user(summary)]
 
     # ---- 单步：LLM 调用与解析 ----
 
     async def _llm_call(self, llm: Any, messages: List[Message],
                         system: str) -> "tuple[str, List[tuple]]":
-        """一次 LLM 调用，返回 (文本, [(工具名, 参数JSON)])。"""
+        """一次 LLM 调用，返回 (文本, [(工具名, 参数JSON)])。
+
+        - max_tokens 取 engine.llm_agent_max_tokens（默认 800）：允许模型一轮
+          批量返回 3~5 个工具调用，减少 API 往返次数（提速核心）；
+        - 文本增量按 STREAM_INTERVAL_S 节流广播 llm/output 事件（Web 日志流式可见）。
+          注意：不能叫 llm/stream——那是 dsh LlmRuntime 的 waterfall 派发通道，
+          同名 emit 监听器会让叙事综述的 LLM 流返回 None。
+        """
+        max_tokens = max(
+            100, int(getattr(self.cfg.engine, "llm_agent_max_tokens", 800)))
         request = LlmRequest(
             config=LlmCallConfig(provider="deepseek",
                                  model=os.environ.get("DEEPSEEK_MODEL",
                                                       "deepseek-chat"),
-                                 max_tokens=160, temperature=0.6),
+                                 max_tokens=max_tokens, temperature=0.6),
             messages=list(messages), tools=self._tool_schemas(), system=system)
         text, tool_calls = "", []
         current: Optional[Dict[str, str]] = None
+        last_stream = 0.0
         async for chunk in llm.stream(request):
             if getattr(chunk, "text", None):
                 text += chunk.text
+                now = time.time()
+                if now - last_stream >= STREAM_INTERVAL_S:
+                    last_stream = now
+                    self.runtime.ctx.emit("llm/output", {
+                        "agent": self.agent_id, "turn": self._turns,
+                        "text": text[-160:]})
             tc = getattr(chunk, "tool_call", None)
             if tc:
                 index = tc.get("index", 0)
@@ -267,12 +375,22 @@ class LlmAttackAgent:
             variant_index=990 + len(self.verdicts),
             variant_of="llm-agent")
         from ..engine.scan import execute_sample
-        verdict, _response = await execute_sample(
-            self.runtime, self.cfg, self.adapter, sample,
-            reset=("side_effect" in base.expected_signals
-                   or base.stateful))
+        needs_lock = ("side_effect" in base.expected_signals
+                      or base.stateful)
+        if needs_lock and self.side_lock is not None:
+            async with self.side_lock:      # 并行 Agent 共享串行通道
+                verdict, response = await execute_sample(
+                    self.runtime, self.cfg, self.adapter, sample, reset=True)
+        else:
+            verdict, response = await execute_sample(
+                self.runtime, self.cfg, self.adapter, sample, reset=needs_lock)
         self.attacks.append(sample)
         self.verdicts.append(verdict)
+        # 每次攻击实时广播：Web 日志逐条可见（判定 + 证据）
+        self.runtime.ctx.emit("attack/executed", {
+            "agent": self.agent_id, "sample": sample.describe(),
+            "status": response.status, "response": response.snippet(300)})
+        self.runtime.ctx.emit("attack/verdict", verdict)
         return verdict
 
     # ---- Explorer 工具：主动侦察与原始 HTTP 攻击（engine.llm_explorer_tools） ----
@@ -322,7 +440,8 @@ class LlmAttackAgent:
             return None
         url = self._raw_url(path)
         response = TargetResponse(status=0)
-        try:
+
+        async def _send() -> TargetResponse:
             import httpx
             kwargs: Dict[str, Any] = {}
             if method in {"POST", "PUT", "PATCH"}:
@@ -342,9 +461,16 @@ class LlmAttackAgent:
                     timeout=self.cfg.target.timeout_s,
                     follow_redirects=False) as client:
                 resp = await client.request(method, url, **kwargs)
-            response = TargetResponse(
+            return TargetResponse(
                 status=resp.status_code, text=resp.text or "",
                 headers=dict(resp.headers))
+
+        try:
+            if self.side_lock is not None:
+                async with self.side_lock:   # 并行 Agent 串行化原始攻击
+                    response = await _send()
+            else:
+                response = await _send()
         except Exception as exc:
             response = TargetResponse(status=0, text=f"(请求失败: {exc})")
         text = response.text or ""
@@ -381,7 +507,7 @@ class LlmAttackAgent:
         self.attacks.append(sample)
         self.verdicts.append(verdict)
         self.runtime.ctx.emit("attack/executed", {
-            "agent": "llm-attacker", "sample": sample.describe(),
+            "agent": self.agent_id, "sample": sample.describe(),
             "status": response.status,
             "response": response.snippet(300)})
         self.runtime.ctx.emit("attack/verdict", verdict)
@@ -415,11 +541,14 @@ class LlmAttackAgent:
     def _mission_prompt(self) -> str:
         refs = self._reference_samples()
         explorer = getattr(self.cfg.engine, "llm_explorer_tools", False)
+        batch = ("3. 每轮一次批量返回 3~5 个不同类别/路径的工具调用"
+                 "（少说废话、直接给工具调用，减少来回次数）；\n")
         if explorer:
             rules = (
-                "1. 先调用 http_probe 侦察路径/端点/隐藏文件，摸清攻击面；\n"
-                "2. 每轮用 attack_vector 或 http_attack 发起一次攻击，持续多轮、越多越好；\n"
-                "3. 每次换不同的 category / payload / 路径 / 措辞，避免重复；\n"
+                "1. http_probe 侦察最多 10 次（只确认关键端点），"
+                "把主要精力放在攻击上，不要反复猜路径；\n"
+                "2. 用 attack_vector / http_attack 持续多轮攻击，越多越好；\n"
+                + batch +
                 "4. 每轮攻击后根据返回的判定调整策略：失败就换攻击点，成功就深入同类；\n"
                 "5. 全部攻击完成后，必须调用 finalize_report 提交最终攻击报告"
                 "（总结发现、成功载荷、修复建议）。")
@@ -429,12 +558,16 @@ class LlmAttackAgent:
                 "可以主动寻找样本库之外的攻击面。")
         else:
             rules = (
-                "1. 每轮用 attack_vector 工具发起一次攻击，持续多轮、越多越好；\n"
+                "1. 每轮用 attack_vector 工具发起攻击，持续多轮、越多越好；\n"
                 "2. 每次换不同的 category / payload / 路径 / 措辞，避免重复；\n"
-                "3. 每轮攻击后根据返回的判定调整策略：失败就换攻击点，成功就深入同类；\n"
-                "4. 全部攻击完成后，必须调用 finalize_report 提交最终攻击报告"
+                + batch +
+                "4. 每轮攻击后根据返回的判定调整策略：失败就换攻击点，成功就深入同类；\n"
+                "5. 全部攻击完成后，必须调用 finalize_report 提交最终攻击报告"
                 "（总结发现、成功载荷、修复建议）。")
             intro = ""
+        hint = (f"\n【分工】你优先负责这些攻击类别：{self.mission_hint}。"
+                f"先覆盖分工内的类别，再自由扩展其他攻击面。\n"
+                if self.mission_hint else "")
         return (
             "你是红队攻击 Agent（自主攻击决策者），任务是发现目标尽可能多的真实漏洞。\n\n"
             "【参考攻击手法】以下是你所在攻击系统样本库中的示例（类别 · 攻击面/目标点 + "
@@ -442,12 +575,15 @@ class LlmAttackAgent:
             "生成你自己的攻击载荷：\n"
             f"{refs}\n\n"
             f"{intro}\n"
+            f"{hint}\n"
             "【执行规则（必须遵守）】\n"
             f"{rules}\n"
             "【扫描摘要】\n" + self.scan_summary[:3000])
 
     def _redteam_system_prompt(self) -> str:
         explorer = getattr(self.cfg.engine, "llm_explorer_tools", False)
+        batch = ("效率要求：每轮一次返回 3~5 个不同类别的工具调用，"
+                 "不要只输出文字，尽量少说话多调用工具。")
         if explorer:
             return (
                 "你是 dsh-red-blue-team 的红队攻击 Agent（自主攻击决策者）。\n"
@@ -461,7 +597,7 @@ class LlmAttackAgent:
                 "你自己不能宣称攻击成功。\n"
                 "行为准则：先侦察再攻击；持续多轮，尽可能多地发现漏洞；"
                 "每次攻击后分析判定结果并调整策略；全部完成后调用 "
-                "finalize_report 提交总结。")
+                "finalize_report 提交总结。\n" + batch)
         return (
             "你是 dsh-red-blue-team 的红队攻击 Agent（自主攻击决策者）。\n"
             "你的全部能力只有两个工具：\n"
@@ -470,7 +606,7 @@ class LlmAttackAgent:
             "你没有文件系统、没有 shell、没有网络工具——只能通过 attack_vector "
             "攻击目标。\n"
             "行为准则：持续多轮攻击，尽可能多地发现漏洞；每次攻击后分析判定结果"
-            "并调整策略；全部完成后调用 finalize_report 提交总结。")
+            "并调整策略；全部完成后调用 finalize_report 提交总结。\n" + batch)
 
 
 def _pick_sample_id(runtime: RedTeamRuntime, category: str) -> str:

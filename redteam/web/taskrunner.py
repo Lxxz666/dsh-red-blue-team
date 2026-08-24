@@ -37,6 +37,10 @@ _TASK_EVENTS = {
     "regression/verified": "回归验证",
     "scan/finished": "扫描完成",
     "scan/failed": "扫描失败",
+    "llm/turn": "LLM 决策轮",
+    "llm/output": "LLM 输出",
+    "llm/tool": "LLM 工具调用",
+    "llm/stop": "LLM 收尾",
 }
 
 
@@ -247,9 +251,26 @@ class TaskRunner:
     def _on_event(self, task: Dict[str, Any], name: str,
                   payload: Any = None) -> None:
         detail = ""
+        agent = ""
         if isinstance(payload, dict):
-            detail = (payload.get("sample") or payload.get("scan_id")
-                      or payload.get("agent") or "")
+            agent = str(payload.get("agent") or "")
+            if name == "llm/turn":
+                detail = (f"[{agent}] 第{payload.get('turn')}轮 · "
+                          f"{payload.get('calls')} 个工具调用"
+                          f" ｜ {str(payload.get('text') or '')[:120]}")
+            elif name == "llm/output":
+                detail = f"[{agent}] {str(payload.get('text') or '')[:160]}"
+            elif name == "llm/tool":
+                detail = f"[{agent}] → {payload.get('tool')} "
+                detail += str(payload.get("args") or "")[:120]
+            elif name == "llm/stop":
+                detail = f"[{agent}] {payload.get('reason')}"
+            elif name == "agent/dispatched":
+                detail = (f"{agent} ｜ {payload.get('task') or ''} "
+                          f"{payload.get('samples') or ''}".strip())
+            else:
+                detail = (payload.get("sample") or payload.get("scan_id")
+                          or agent or "")
         elif hasattr(payload, "sample_uid") and hasattr(payload, "verdict"):
             detail = f"{payload.sample_uid} → {payload.verdict}"
         elif hasattr(payload, "sample_uid"):

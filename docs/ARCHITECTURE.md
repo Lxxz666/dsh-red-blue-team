@@ -170,7 +170,8 @@ domain 分区 = 目标类型×业务域；持久化 = SQLite JSON 快照。
 - `test_llm_variants`：脚本化 LLM 的变体生成/解析/并入计划、mock 与故障静默降级；
 - `test_detector`：拒绝话术不误报、5xx 不计漏洞、存疑绝不自动上报；
 - `test_llm_agent`：脚本化 LLM 驱动完整 agent loop（攻击/判定/收尾）、无 LLM 优雅降级、
-  主 Agent 集成（判定并入/落库/报告）；
+  主 Agent 集成（判定并入/落库/报告）、**并行 Agent 分桶合并**、**过程事件流式广播**
+  （启动派发/决策轮/工具调用/攻击判定逐条事件）；
 - `test_llm_explorer`：http_probe 侦察回执、http_attack 原始攻击确定性判定
   （命中 → `llm_explored` 漏洞；加固目标 → failed）、工具开关门控、主 Agent 合并落库；
 - `test_llm_fixplan`：LLM 修复建议写入 plan.ai_note/finding.fix 并呈现在修复报告、

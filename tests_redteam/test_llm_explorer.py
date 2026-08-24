@@ -131,6 +131,7 @@ async def test_orchestrator_merges_explored_findings(vuln_lab, tmp_path,
     lab, guards_file = vuln_lab
     cfg = make_config(lab, guards_file, tmp_path)
     cfg.engine.llm_agent = True
+    cfg.engine.llm_agent_parallel = 1   # 单 Agent：确定性断言
     cfg.vectors.categories = ["direct_injection"]
     runtime = RedTeamRuntime(cfg)
     await runtime.start()

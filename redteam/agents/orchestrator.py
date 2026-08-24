@@ -116,29 +116,49 @@ class AttackOrchestrator:
                         "samples": len(followup_samples)})
                     verdicts = list(verdicts) + \
                         await self._dispatch_attack_workers(followup_samples)
-            # ④c V11 LLM 自主攻击 Agent（完整 dsh agent loop，opt-in）
+            # ④c V11 LLM 自主攻击 Agent（并行 N 个，各负责一批类别，提速；opt-in）
             if cfg.engine.llm_agent and self.adapter is not None and samples:
                 from .llm_agent import LlmAttackAgent
                 summary = self._scan_summary_for_llm(verdicts, samples)
-                llm_result = await LlmAttackAgent(
-                    rt, cfg, self.adapter, summary, scan_id=self.scan_id,
-                    timeout_s=cfg.engine.llm_agent_timeout_s).run()
-                if llm_result.verdicts:
-                    ctx.emit("agent/dispatched", {
-                        "agent": "llm-attacker", "task": "LLM 自主攻击",
-                        "samples": len(llm_result.verdicts)})
-                    for index, verdict in enumerate(llm_result.verdicts):
-                        rt.storage.record_attack(
-                            self.scan_id, verdict,
-                            verdict.evidence[:500])
-                        if rt.terrain is not None and index < len(
-                                llm_result.samples):
-                            rt.terrain.record(llm_result.samples[index],
-                                              verdict.verdict)
-                    samples = list(samples) + llm_result.samples
-                    verdicts = list(verdicts) + llm_result.verdicts
-                if llm_result.final_report:
-                    self.llm_agent_report = llm_result.final_report
+                parallel = max(1, int(getattr(
+                    cfg.engine, "llm_agent_parallel", 1)))
+                budget = max(1, (cfg.engine.llm_agent_max_attacks +
+                                 parallel - 1) // parallel)  # 预算均分
+                buckets = self._category_buckets(parallel)
+                side_lock = asyncio.Lock()   # 状态型攻击跨并行 Agent 互斥
+                llm_agents = [
+                    LlmAttackAgent(
+                        rt, cfg, self.adapter, summary, scan_id=self.scan_id,
+                        timeout_s=cfg.engine.llm_agent_timeout_s,
+                        agent_id="llm-attacker" if index == 0
+                        else f"llm-attacker-{index + 1}",
+                        mission_hint="、".join(buckets[index]),
+                        side_lock=side_lock, max_attacks=budget)
+                    for index in range(parallel)]
+                llm_results = await asyncio.gather(*[
+                    agent.run() for agent in llm_agents])
+                for llm_result in llm_results:
+                    if llm_result.verdicts:
+                        ctx.emit("agent/dispatched", {
+                            "agent": llm_result.agent_id,
+                            "task": "LLM 自主攻击",
+                            "samples": len(llm_result.verdicts)})
+                        for index, verdict in enumerate(
+                                llm_result.verdicts):
+                            rt.storage.record_attack(
+                                self.scan_id, verdict,
+                                verdict.evidence[:500])
+                            if rt.terrain is not None and index < len(
+                                    llm_result.samples):
+                                rt.terrain.record(llm_result.samples[index],
+                                                  verdict.verdict)
+                        samples = list(samples) + llm_result.samples
+                        verdicts = list(verdicts) + llm_result.verdicts
+                    if llm_result.final_report:
+                        self.llm_agent_report += (
+                            (f"\n[{llm_result.agent_id}] " if self.llm_agent_report
+                             else f"[{llm_result.agent_id}] ")
+                            + llm_result.final_report)
             result.verdicts = verdicts
 
             # ⑤ 汇总：漏洞落库（动态 + 静态）
@@ -376,6 +396,14 @@ class AttackOrchestrator:
                  "已命中类别: " + ("、".join(sorted(hit)) or "无"),
                  "未命中类别: " + ("、".join(missed) or "无")]
         return "\n".join(lines)
+
+    def _category_buckets(self, parallel: int) -> List[List[str]]:
+        """把样本库攻击类别轮转分成 N 桶（并行 LLM 攻击 Agent 分工，减少重复）。"""
+        categories = sorted({s.category for s in self.runtime.registry.samples})
+        buckets: List[List[str]] = [[] for _ in range(parallel)]
+        for index, category in enumerate(categories):
+            buckets[index % parallel].append(category)
+        return buckets
 
     async def _dispatch_attack_workers(self, samples: List[ConcreteSample]
                                        ) -> List[VerdictResult]:

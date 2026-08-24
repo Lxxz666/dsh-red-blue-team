@@ -820,7 +820,7 @@ def cmd_web(args: argparse.Namespace) -> None:
                 "storage": {"db_path": os.path.join(out_dir, "web.db"),
                             "audit_dir": os.path.join(out_dir, "audit")},
                 "out_dir": os.path.join(out_dir, "reports"),
-                "engine": {"concurrency": 4, "min_interval_ms": 5},
+                "engine": {"concurrency": 8, "min_interval_ms": 5},
             })
     from .web.panel import _llm_available, create_app
     app = create_app(cfg, runtime_dir, lab=lab)
