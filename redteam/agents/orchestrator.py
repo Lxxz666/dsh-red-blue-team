@@ -105,6 +105,15 @@ class AttackOrchestrator:
             verdicts: List[VerdictResult] = []
             if samples:
                 verdicts = await self._dispatch_attack_workers(samples)
+            # ④b V9-lite LLM 定向补打：分析未命中向量 → LLM 生成针对性攻击链 → 第二轮
+            if cfg.engine.llm_followup and self.adapter is not None and samples:
+                followup_samples = await self._llm_followup_plan(samples, verdicts)
+                if followup_samples:
+                    ctx.emit("agent/dispatched", {
+                        "agent": "followup", "task": "LLM 定向补打",
+                        "samples": len(followup_samples)})
+                    verdicts = list(verdicts) + \
+                        await self._dispatch_attack_workers(followup_samples)
             result.verdicts = verdicts
 
             # ⑤ 汇总：漏洞落库（动态 + 静态）
@@ -283,6 +292,52 @@ class AttackOrchestrator:
             log.info("LLM 攻击链生成：新增 %d 条多轮攻击链", chain_count)
         additions.sort(key=lambda s: (s.category, s.sample.id, s.uid))
         return list(samples) + additions
+
+    async def _llm_followup_plan(self, samples: List[ConcreteSample],
+                                 verdicts: List[VerdictResult]
+                                 ) -> List[ConcreteSample]:
+        """V9-lite 定向补打：对首轮未命中的向量类别，用 LLM 生成针对性
+        攻击链（铺垫+载荷），供第二轮补打。DeepSeek 不可用/失败 → 空。"""
+        cfg, rt = self.cfg, self.runtime
+        llm = rt.llm
+        if llm is None or "deepseek" not in llm.providers():
+            return []
+        tried = {v.category for v in verdicts}
+        missed = sorted(tried - {v.category for v in verdicts if v.success})
+        if not missed:
+            return []
+        additions: List[ConcreteSample] = []
+        followup_index = 0
+        for base in rt.registry.samples:
+            if base.category not in missed or base.surface != "chat":
+                continue
+            try:
+                chains = await rt.registry.generate_llm_chains(base, n=1)
+            except Exception as exc:
+                log.debug("补打链生成异常（跳过）: %s", exc)
+                chains = []
+            if not chains:
+                continue
+            roles = [r for r in (base.role_context or list(cfg.vectors.roles))
+                     if r in cfg.vectors.roles]
+            for role in roles:
+                for messages in chains:
+                    prelude, payload = messages[:-1], messages[-1]
+                    additions.append(ConcreteSample(
+                        uid=f"{base.id}-{role}-followup{followup_index}",
+                        sample=base, role=role, payload=payload,
+                        params={}, body={}, path="",
+                        variant_index=700 + followup_index,
+                        variant_of="llm-followup", prelude=prelude))
+                    followup_index += 1
+                    if followup_index >= 10:   # 补打样本上限（防失控）
+                        break
+            if followup_index >= 10:
+                break
+        if additions:
+            log.info("LLM 定向补打：未命中类别 %s → 生成 %d 条针对性攻击链",
+                     missed, len(additions))
+        return additions
 
     async def _dispatch_attack_workers(self, samples: List[ConcreteSample]
                                        ) -> List[VerdictResult]:

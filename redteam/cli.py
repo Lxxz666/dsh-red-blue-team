@@ -100,6 +100,17 @@ def build_parser() -> argparse.ArgumentParser:
     web.add_argument("--host", default="127.0.0.1")
     web.add_argument("--with-lab", action="store_true",
                      help="自动启动内置靶场并以其为目标")
+
+    batch = sub.add_parser("batch", help="多目标批扫（targets.yml 串行扫描+风险排序汇总）")
+    batch.add_argument("--targets", required=True, help="多目标清单 YAML")
+    batch.add_argument("--out", default="./batch_reports", help="报告输出目录")
+
+    schedule = sub.add_parser("schedule", help="定时扫描（V10：周期扫描+报告留存+可选推送）")
+    schedule.add_argument("--config", required=True, help="扫描配置 scan.yml")
+    schedule.add_argument("--every", default="24h", help="周期：30m/1h/24h（测试可用 5s）")
+    schedule.add_argument("--out", default="./scheduled", help="报告留存目录")
+    schedule.add_argument("--webhook", default="", help="可选：每次扫描后 POST JSON 摘要")
+    schedule.add_argument("--once", action="store_true", help="只跑一次（测试用）")
     return parser
 
 
@@ -127,6 +138,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             cmd_scenarios(args)
         elif args.command == "web":
             cmd_web(args)   # uvicorn 自行管理事件循环（同步入口）
+        elif args.command == "batch":
+            asyncio.run(cmd_batch(args))
+        elif args.command == "schedule":
+            asyncio.run(cmd_schedule(args))
         else:
             build_parser().print_help()
             return 1
@@ -572,6 +587,153 @@ def cmd_scenarios(args: argparse.Namespace) -> None:
     print(f"  端点指纹: {scenario.endpoint_keywords}")
     print(f"  内容指纹: {scenario.content_keywords}")
     print(f"  专属样本类别: {scenario.sample_categories}")
+
+
+async def cmd_batch(args: argparse.Namespace) -> None:
+    """多目标批扫：targets.yml 串行扫描 + 风险排序汇总报告。
+
+    targets.yml 格式: 每个条目 = 完整扫描配置 dict（可用 name 覆盖目标名）:
+        - name: 电商系统
+          target: { type: lab, base_url: "http://127.0.0.1:8765", ... }
+          vectors: { categories: [all], variants_per_sample: 1 }
+        - name: 内部服务(静态)
+          target: { type: folder, folder_path: "./src" }
+    """
+    import yaml as _yaml
+    if not os.path.exists(args.targets):
+        raise RedTeamError(f"目标清单不存在: {args.targets}")
+    with open(args.targets, "r", encoding="utf-8") as fh:
+        entries = _yaml.safe_load(fh) or []
+    if not isinstance(entries, list) or not entries:
+        raise RedTeamError("targets.yml 必须是目标配置列表")
+    from .runtime import RedTeamRuntime
+    from .engine import ScanRunner, build_adapter
+    results = []
+    for index, entry in enumerate(entries, start=1):
+        if not isinstance(entry, dict):
+            raise RedTeamError(f"第 {index} 个目标配置必须是映射")
+        name = str(entry.pop("name", f"target-{index}"))
+        cfg = ScanConfig.from_dict(entry)
+        cfg.out_dir = os.path.join(args.out, "reports")
+        print(f"\n[{index}/{len(entries)}] 扫描目标: {name}（{cfg.target.type}）")
+        runtime = RedTeamRuntime(cfg)
+        await runtime.start()
+        adapter = None
+        try:
+            adapter = build_adapter(cfg)
+            result = await ScanRunner(runtime, cfg, adapter,
+                                      scan_mode=f"batch-{index}").run()
+            severity_counts = result.severity_counts()
+            # 风险评分：critical×10 + high×5 + medium×2 + low×1
+            score = (severity_counts.get("critical", 0) * 10
+                     + severity_counts.get("high", 0) * 5
+                     + severity_counts.get("medium", 0) * 2
+                     + severity_counts.get("low", 0))
+            results.append({"name": name, "type": cfg.target.type,
+                            "scan_id": result.scan_id, "score": score,
+                            "total": result.total,
+                            "success": result.success_count,
+                            "findings": len(result.findings),
+                            "severity_counts": severity_counts,
+                            "report": result.report_path})
+            print(f"  命中 {result.success_count} / 发现 "
+                  f"{len(result.findings)} 条漏洞 / 风险评分 {score}")
+        finally:
+            if adapter is not None:
+                await adapter.close()
+            await runtime.close()
+    _write_batch_summary(results, args.out)
+
+
+def _write_batch_summary(results: List[Dict[str, Any]], out_dir: str) -> None:
+    """风险排序汇总报告（按风险评分降序）。"""
+    import time as _time
+    os.makedirs(out_dir, exist_ok=True)
+    stamp = _time.strftime("%Y%m%d%H%M%S")
+    path = os.path.join(out_dir, f"batch_summary_{stamp}.md")
+    ranked = sorted(results, key=lambda r: -r["score"])
+    lines = [f"# 多目标批扫汇总报告",
+             f"\n> 生成时间: {_time.strftime('%Y-%m-%dT%H:%M:%S%z')} ｜ "
+             f"目标数: {len(results)}\n",
+             "## 风险排序\n",
+             "| 排名 | 目标 | 类型 | 风险评分 | 命中 | 漏洞数 | 严重/高/中/低 |",
+             "|:---:|:---|:---:|:---:|:---:|:---:|:---:|"]
+    for index, row in enumerate(ranked, start=1):
+        counts = row["severity_counts"]
+        lines.append(
+            f"| {index} | {row['name']} | {row['type']} | **{row['score']}** "
+            f"| {row['success']} | {row['findings']} | "
+            f"{counts.get('critical', 0)}/{counts.get('high', 0)}/"
+            f"{counts.get('medium', 0)}/{counts.get('low', 0)} |")
+    lines.append("\n## 明细\n")
+    for row in ranked:
+        lines.append(f"- **{row['name']}**（{row['scan_id']}）: "
+                     f"报告 {row['report']}")
+    content = "\n".join(lines) + "\n"
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(content)
+    print(f"\n批扫完成：{len(results)} 个目标，汇总报告 {path}")
+    if ranked:
+        print(f"风险最高目标: {ranked[0]['name']}（评分 {ranked[0]['score']}）")
+
+
+async def cmd_schedule(args: argparse.Namespace) -> None:
+    """定时扫描：周期执行扫描 + 报告按时间留存 + 可选 webhook 推送。"""
+    import time as _time
+    interval_s = _parse_interval(args.every)
+    from .runtime import RedTeamRuntime
+    from .engine import ScanRunner, build_adapter
+    import httpx as _httpx
+    os.makedirs(args.out, exist_ok=True)
+    cfg = ScanConfig.from_yaml(args.config)
+    print(f"定时扫描已启动：每 {args.every} 一次（Ctrl+C 停止），"
+          f"报告留存 {args.out}")
+    while True:
+        stamp = _time.strftime("%Y%m%d_%H%M%S")
+        run_dir = os.path.join(args.out, f"scan_{stamp}")
+        os.makedirs(run_dir, exist_ok=True)
+        cfg.out_dir = os.path.join(run_dir, "reports")
+        cfg.storage.db_path = os.path.join(run_dir, "scan.db")
+        cfg.storage.audit_dir = os.path.join(run_dir, "audit")
+        runtime = RedTeamRuntime(cfg)
+        await runtime.start()
+        adapter = None
+        try:
+            adapter = build_adapter(cfg)
+            result = await ScanRunner(runtime, cfg, adapter,
+                                      scan_mode=f"schedule-{stamp}").run()
+            print(f"[{stamp}] 扫描完成：命中 {result.success_count}，"
+                  f"发现 {len(result.findings)} 条漏洞 → {result.report_path}")
+            if args.webhook:
+                payload = {"scan_id": result.scan_id,
+                           "target": result.target,
+                           "timestamp": result.finished_at,
+                           "success": result.success_count,
+                           "findings": len(result.findings),
+                           "severity_counts": result.severity_counts(),
+                           "report": result.report_path}
+                try:
+                    async with _httpx.AsyncClient(timeout=10.0) as client:
+                        await client.post(args.webhook, json=payload)
+                except Exception as exc:
+                    print(f"  webhook 推送失败: {exc}")
+        finally:
+            if adapter is not None:
+                await adapter.close()
+            await runtime.close()
+        if args.once:
+            break
+        await asyncio.sleep(interval_s)
+
+
+def _parse_interval(text: str) -> float:
+    """解析周期：30m/1h/24h/5s → 秒。"""
+    import re as _re
+    match = _re.fullmatch(r"(\d+)\s*(s|m|h|d)", str(text).strip().lower())
+    if not match:
+        raise RedTeamError(f"无法解析周期: {text!r}（如 30m/1h/24h/5s）")
+    value, unit = int(match.group(1)), match.group(2)
+    return value * {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit]
 
 
 def cmd_web(args: argparse.Namespace) -> None:

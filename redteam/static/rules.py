@@ -98,6 +98,49 @@ RULES: List[StaticRule] = [
                (".py",),
                "deserialization-safe",
                "yaml.load 可执行任意对象构造（换 yaml.safe_load）"),
+    StaticRule("st-016", "weak_jwt_secret", "critical", "JWT 弱密钥/硬编码签名密钥",
+               r"(?i)(jwt|SECRET_KEY|JWT_SECRET)\s*[:=(]\s*['\"][^'\"]{1,20}['\"]",
+               (".py", ".js", ".ts", ".java", ".go", ".env", ".yml", ".yaml"),
+               "jwt-secret-hardening",
+               "JWT 签名密钥过短/硬编码可被离线爆破伪造令牌"),
+    StaticRule("st-017", "plaintext_http", "medium", "明文 HTTP 调用",
+               r"http://(?!localhost|127\.0\.0\.1)[\w.\-]+",
+               (".py", ".js", ".ts", ".java", ".go"),
+               "tls-enforce",
+               "业务代码使用明文 http:// 调用外部服务（应强制 https）"),
+    StaticRule("st-018", "tls_verify_disabled", "high", "TLS 证书校验被禁用",
+               r"(?i)(verify\s*=\s*False|rejectUnauthorized\s*[:=]\s*false|InsecureSkipVerify\s*:\s*true)",
+               (".py", ".js", ".ts", ".go", ".java"),
+               "tls-enforce",
+               "禁用 TLS 证书校验使通信可被中间人劫持"),
+    StaticRule("st-019", "terraform_open_cidr", "critical", "Terraform 安全组全网段开放",
+               r"cidr_blocks\s*=\s*\[\s*['\"]0\.0\.0\.0/0['\"]",
+               (".tf",),
+               "terraform-hardening",
+               "安全组对 0.0.0.0/0 开放（管理端口应限制来源 IP）"),
+    StaticRule("st-020", "k8s_insecure_workload", "critical", "K8s 工作负载不安全配置",
+               r"(?i)(privileged\s*:\s*true|hostNetwork\s*:\s*true|automountServiceAccountToken\s*:\s*true)",
+               (".yml", ".yaml"),
+               "k8s-hardening",
+               "特权容器/宿主网络/默认挂载 SA 令牌违反 K8s 安全基线（K01/K02）"),
+    StaticRule("st-021", "java_hardcoded_secret", "critical", "Java 硬编码密钥/密码",
+               r"(?i)(String\s+\w*(secret|password|apikey|api_key)\w*\s*=\s*['\"][^'\"]{6,}['\"])",
+               (".java",),
+               "secret-rotation",
+               "Java 源码硬编码凭据（可被反编译提取）"),
+    StaticRule("st-022", "go_hardcoded_secret", "critical", "Go 硬编码密钥/密码",
+               r"(?i)(secret|password|apikey|api_key)\w*\s*:?=\s*['\"][A-Za-z0-9_\-]{8,}['\"]",
+               (".go",),
+               "secret-rotation",
+               "Go 源码硬编码凭据（二进制可被 strings 提取）"),
+]
+
+#: 令牌文件规则（按文件名匹配，无行号）
+_TOKEN_FILE_RULES: List[Tuple[str, str, str, str]] = [
+    (r"(^|/)\.npmrc$", "sensitive_file", "high", "npm 令牌文件被纳入项目"),
+    (r"(^|/)\.pypirc$", "sensitive_file", "high", "PyPI 凭据文件被纳入项目"),
+    (r"(^|/)\.dockercfg$", "sensitive_file", "high", "Docker Registry 凭据被纳入项目"),
+    (r"credentials\.(json|xml)$", "sensitive_file", "critical", "云服务凭据文件被纳入项目"),
 ]
 
 #: 敏感文件规则（按文件名匹配，无行号）
@@ -111,7 +154,8 @@ _SENSITIVE_FILE_RULES: List[Tuple[str, str, str, str]] = [
 ]
 SENSITIVE_FILES: List[Tuple[Pattern, str, str, str]] = [
     (re.compile(pattern), category, severity, hint)
-    for pattern, category, severity, hint in _SENSITIVE_FILE_RULES]
+    for pattern, category, severity, hint
+    in _SENSITIVE_FILE_RULES + _TOKEN_FILE_RULES]
 
 #: CVE-lite 依赖漏洞表：包名 → (首个修复版本, 说明)
 #: 说明：教学用启发式清单（非完整 CVE 数据库），生产建议接入 osv-scanner/pip-audit。
@@ -128,6 +172,20 @@ CVE_LITE = {
     "sqlalchemy": ("1.4.50", "SQLAlchemy 旧版本存在 SQL 注入漏洞"),
     "werkzeug": ("2.2.3", "Werkzeug 旧版本存在调试器 RCE 风险"),
     "torch": ("1.13.1", "torch 旧版本存在反序列化漏洞（torch.load）"),
+}
+
+#: npm CVE-lite 依赖漏洞表：包名 → (首个修复版本, 说明)
+NPM_CVE_LITE = {
+    "lodash": ("4.17.21", "lodash <4.17.21 存在原型污染漏洞（CVE-2021-23337）"),
+    "axios": ("1.6.0", "axios 旧版本存在 SSRF/原型污染漏洞"),
+    "express": ("4.19.2", "express <4.19.2 存在开放重定向漏洞"),
+    "jsonwebtoken": ("9.0.0", "jsonwebtoken 旧版本存在算法混淆漏洞"),
+    "minimist": ("1.2.6", "minimist <1.2.6 存在原型污染漏洞"),
+    "node-fetch": ("3.2.10", "node-fetch 旧版本存在 SSRF 漏洞"),
+    "semver": ("7.5.2", "semver 旧版本存在 ReDoS 漏洞"),
+    "tar": ("6.1.15", "tar 旧版本存在路径穿越漏洞"),
+    "webpack-dev-server": ("4.15.1", "webpack-dev-server 旧版本存在任意文件读取"),
+    "ws": ("8.17.1", "ws 旧版本存在拒绝服务漏洞"),
 }
 
 _RULES_BY_CATEGORY = {r.category for r in RULES}

@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from ..blueteam.templates import fix_template_for
 from . import templates  # noqa: F401  (注册静态修复模板)
-from .rules import CVE_LITE, RULES, SENSITIVE_FILES
+from .rules import CVE_LITE, NPM_CVE_LITE, RULES, SENSITIVE_FILES
 
 log = logging.getLogger("redteam.static")
 
@@ -69,9 +69,11 @@ class StaticScanner:
                             rule_id="st-file", category=category,
                             severity=severity, title=hint, file=rel,
                             evidence=f"敏感文件: {rel}"))
-                # 依赖清单 CVE-lite 比对
+                # 依赖清单 CVE-lite 比对（Python / npm）
                 if name in ("requirements.txt", "pyproject.toml"):
                     findings.extend(self._scan_dependencies(path, rel))
+                if name == "package.json":
+                    findings.extend(self._scan_npm_dependencies(path, rel))
                 if not self._match_globs(name):
                     continue
                 if os.path.getsize(path) > MAX_FILE_SIZE:
@@ -136,6 +138,41 @@ class StaticScanner:
                     file=rel, line=line_index,
                     snippet=stripped[:160],
                     evidence=f"{rel}:{line_index}: {package} {version} → {hint}"))
+        return findings
+
+    _NPM_SPEC = re.compile(r"^[\^~<>=]*\s*v?([0-9][A-Za-z0-9_.\-]*)")
+
+    def _scan_npm_dependencies(self, path: str, rel: str
+                               ) -> List[StaticFinding]:
+        """package.json 依赖 CVE-lite 比对（dependencies/devDependencies）。"""
+        import json as _json
+        findings: List[StaticFinding] = []
+        try:
+            with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+                data = _json.load(fh)
+        except (OSError, ValueError):
+            return findings
+        if not isinstance(data, dict):
+            return findings
+        for section in ("dependencies", "devDependencies"):
+            entries = data.get(section)
+            if not isinstance(entries, dict):
+                continue
+            for package, spec in entries.items():
+                key = package.lower()
+                if key not in NPM_CVE_LITE:
+                    continue
+                fixed, hint = NPM_CVE_LITE[key]
+                match = self._NPM_SPEC.match(str(spec))
+                version = match.group(1) if match else ""
+                if version and _version_lt(version, fixed):
+                    findings.append(StaticFinding(
+                        rule_id="st-012", category="dependency_vuln",
+                        severity="high",
+                        title=f"npm 依赖 {package} 版本含已知漏洞（CVE-lite）",
+                        file=rel, line=0,
+                        snippet=f'"{package}": "{spec}"',
+                        evidence=f"{rel}: {package} {spec} → {hint}"))
         return findings
 
     @staticmethod

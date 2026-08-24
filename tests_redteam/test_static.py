@@ -89,3 +89,54 @@ def test_scanner_ignores_vcs_and_caches(tmp_path):
         fh.write("element.innerHTML = x;\nAPI_KEY='sk-x';")
     findings = StaticScanner().scan(str(proj))
     assert not any("node_modules" in f.file for f in findings)
+
+
+def test_scanner_new_rules(tmp_path):
+    """扩展规则：JWT 弱密钥/明文HTTP/TLS禁用/Terraform/K8s/Java/Go/令牌文件/npm CVE。"""
+    proj = tmp_path / "proj2"
+    os.makedirs(proj, exist_ok=True)
+    files = {
+        "app.py": 'JWT_SECRET = "secret123"\n'
+                  'requests.get("http://api.example.com/x", verify=False)\n',
+        "main.go": 'apikey := "sk-abcdefgh12345678"\n',
+        "Server.java": 'String dbPassword = "prod-db-pass-2026";\n',
+        "main.tf": 'ingress { from_port = 22; cidr_blocks = ["0.0.0.0/0"] }\n',
+        "deploy.yaml": 'spec:\n  hostNetwork: true\n'
+                       '  containers: [{name: app, securityContext: '
+                       '{privileged: true}}]\n',
+        "package.json": '{"dependencies": {"lodash": "4.17.15", '
+                        '"express": "^4.17.1", "react": "^18.2.0"}}\n',
+        ".npmrc": "//registry.npmjs.org/:_authToken=npm_token_abc\n",
+    }
+    for name, content in files.items():
+        with open(proj / name, "w", encoding="utf-8") as fh:
+            fh.write(content)
+    findings = StaticScanner().scan(str(proj))
+    categories = {f.category for f in findings}
+    assert "weak_jwt_secret" in categories
+    assert "plaintext_http" in categories
+    assert "tls_verify_disabled" in categories
+    assert "terraform_open_cidr" in categories
+    assert "k8s_insecure_workload" in categories
+    assert "java_hardcoded_secret" in categories
+    assert "go_hardcoded_secret" in categories
+    # npm CVE-lite 命中 lodash/express，react 不误报
+    deps = {f.snippet for f in findings if f.category == "dependency_vuln"}
+    assert any("lodash" in s for s in deps)
+    assert any("express" in s for s in deps)
+    assert not any("react" in s for s in deps)
+    # 令牌文件
+    assert any(f.file == ".npmrc" for f in findings
+               if f.category == "sensitive_file")
+
+
+def test_scanner_no_http_localhost_false_positive(tmp_path):
+    """localhost/127.0.0.1 明文调用不误报。"""
+    proj = tmp_path / "proj3"
+    os.makedirs(proj, exist_ok=True)
+    with open(proj / "app.py", "w", encoding="utf-8") as fh:
+        fh.write('requests.get("http://127.0.0.1:8080/health")\n'
+                 'requests.get("http://localhost/api")\n'
+                 'requests.get("https://api.example.com/x")\n')
+    findings = StaticScanner().scan(str(proj))
+    assert not any(f.category == "plaintext_http" for f in findings)

@@ -1,0 +1,33 @@
+# 多目标批扫清单示例
+# 用法: dsh-redteam batch --targets examples/targets.yml
+# 每个条目 = 完整扫描配置（name 覆盖目标显示名），串行扫描后输出风险排序汇总报告。
+
+- name: 电商系统（内置靶场）
+  profile: quick
+  target:
+    name: ecommerce-lab
+    type: lab
+    base_url: "http://127.0.0.1:8765"
+    guards_file: "./lab_guards.yml"
+  vectors: { categories: [all], variants_per_sample: 1 }
+  detector: { baseline: true }
+
+- name: 内部 Python 服务（静态审计）
+  profile: quick
+  target:
+    name: internal-service
+    type: folder
+    folder_path: "./src"
+    scenario: auto
+  vectors: { categories: [all], variants_per_sample: 1 }
+
+# - name: 外部授权系统（需授权声明）
+#   profile: quick
+#   target:
+#     name: client-system
+#     type: http
+#     base_url: "http://203.0.113.10"
+#   authorization:
+#     authorized_by: "目标所有者"
+#     contact: "sec@example.com"
+#     scope: "仅限授权测试环境"

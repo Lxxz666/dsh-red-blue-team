@@ -166,6 +166,115 @@ register_template(FixTemplate(
     manual_steps=("移除敏感文件并轮换密钥", ".gitignore 规则", "git 历史清洗"),
     verify_steps=["仓库与部署包中无敏感文件"]))
 
+register_template(FixTemplate(
+    "jwt-secret-hardening", "weak_jwt_secret", "JWT 签名密钥加固（长随机密钥 + 算法固定）",
+    explanation=(
+        "【现象】JWT 签名密钥过短或硬编码在代码/配置中。\n"
+        "【根因】弱密钥可被离线爆破；算法未固定可被混淆攻击（alg=none/HS256↔RS256）。\n"
+        "【影响】攻击者伪造任意身份令牌，评级 critical。"),
+    rationale="JWT 安全依赖密钥强度与算法固定：256-bit 随机密钥 + 服务端固定允许算法。",
+    how_to_fix=[
+        "密钥改为 ≥32 字节密码学随机值，从 KMS/环境变量注入（不入库）",
+        "验证时固定允许算法（如仅 HS256 或 RS256，拒绝 alg=none）",
+        "密钥定期轮换 + 泄露立即作废",
+    ],
+    code_before=(
+        "# 修复前：弱密钥 + 算法不固定\n"
+        "import jwt\n"
+        "SECRET = \"secret123\"\n"
+        "payload = jwt.decode(token, SECRET, algorithms=[\"HS256\"])  # 密钥可爆破"),
+    code_after=(
+        "# 修复后：强随机密钥 + 算法白名单\n"
+        "import os, jwt\n"
+        "SECRET = os.environ[\"JWT_SECRET\"]          # ≥32 字节随机，KMS 注入\n"
+        "payload = jwt.decode(token, SECRET, algorithms=[\"HS256\"])  # 显式白名单"),
+    auto_fixable=False,
+    manual_steps=("密钥换 ≥32 字节随机值并移入 KMS", "固定允许算法白名单",
+                  "密钥轮换机制"),
+    verify_steps=["alg=none/弱密钥伪造令牌被拒绝"]))
+
+register_template(FixTemplate(
+    "tls-enforce", "plaintext_http", "强制 HTTPS（明文调用与 TLS 校验禁用）",
+    explanation=(
+        "【现象】代码使用明文 http:// 调用外部服务，或禁用了 TLS 证书校验。\n"
+        "【根因】传输层未加密/未验证对端身份。\n"
+        "【影响】流量可被窃听/篡改（中间人攻击），评级 high。"),
+    rationale="外部通信必须 HTTPS 且开启证书校验；内网自签证书走显式白名单。",
+    how_to_fix=[
+        "所有外部调用改 https://",
+        "移除 verify=False / rejectUnauthorized:false / InsecureSkipVerify",
+        "自签证书场景：显式指定 CA 包而非全局关闭校验",
+    ],
+    code_before=(
+        "# 修复前\n"
+        "requests.get(\"http://api.internal.example.com\", verify=False)"),
+    code_after=(
+        "# 修复后\n"
+        "requests.get(\"https://api.internal.example.com\",\n"
+        "             verify=\"/etc/ssl/ca-bundle.pem\")"),
+    auto_fixable=False,
+    manual_steps=("外部调用改 https", "移除 TLS 校验禁用",
+                  "自签证书用显式 CA 包"),
+    verify_steps=["代码审计无 http:// 与 verify=False"]))
+
+register_template(FixTemplate(
+    "terraform-hardening", "terraform_open_cidr", "Terraform 安全组收紧（禁 0.0.0.0/0）",
+    explanation=(
+        "【现象】Terraform 安全组规则对 0.0.0.0/0 开放端口。\n"
+        "【根因】基础设施即代码未按最小暴露原则配置。\n"
+        "【影响】管理端口/服务对全网开放，评级 critical。"),
+    rationale="安全组只允许必要的来源 IP/网段；管理端口绑定内网或堡垒机。",
+    how_to_fix=[
+        "cidr_blocks 改为业务来源网段/固定办公 IP",
+        "管理端口（22/3389/数据库）只对内网/堡垒机开放",
+        "IaC 变更走评审 + tfsec/checkov 扫描进 CI",
+    ],
+    code_before=(
+        "# 修复前\n"
+        "ingress {\n"
+        "  from_port = 22\n"
+        "  cidr_blocks = [\"0.0.0.0/0\"]      # 全网可连 SSH\n"
+        "}"),
+    code_after=(
+        "# 修复后\n"
+        "ingress {\n"
+        "  from_port = 22\n"
+        "  cidr_blocks = [\"10.0.0.0/8\"]      # 仅内网\n"
+        "}"),
+    auto_fixable=False,
+    manual_steps=("安全组来源网段收紧", "管理端口内网化", "tfsec 扫描进 CI"),
+    verify_steps=["安全组无 0.0.0.0/0 入站规则"]))
+
+register_template(FixTemplate(
+    "k8s-hardening", "k8s_insecure_workload", "K8s 工作负载加固（去特权/禁宿主网络/禁自动挂 SA）",
+    explanation=(
+        "【现象】工作负载声明 privileged/hostNetwork/automountServiceAccountToken。\n"
+        "【根因】K8s 安全基线未执行（OWASP K8s Top10 K01/K02）。\n"
+        "【影响】容器逃逸放大、跨节点网络、SA 令牌被盗用，评级 critical。"),
+    rationale="按 K8s Pod Security 基线加固：最小特权、网络隔离、SA 令牌按需挂载。",
+    how_to_fix=[
+        "移除 privileged: true 与 hostNetwork: true",
+        "automountServiceAccountToken 按需开启（默认 false）",
+        "启用 PodSecurityAdmission/OPA 策略强制基线",
+    ],
+    code_before=(
+        "# 修复前\n"
+        "spec:\n"
+        "  containers:\n"
+        "    - name: app\n"
+        "      securityContext: { privileged: true }\n"
+        "  hostNetwork: true"),
+    code_after=(
+        "# 修复后\n"
+        "spec:\n"
+        "  automountServiceAccountToken: false\n"
+        "  containers:\n"
+        "    - name: app\n"
+        "      securityContext: { allowPrivilegeEscalation: false }"),
+    auto_fixable=False,
+    manual_steps=("去特权/宿主网络", "SA 令牌按需挂载", "PSA 策略强制"),
+    verify_steps=["kubectl 审计无 privileged/hostNetwork 工作负载"]))
+
 
 def register_all() -> None:
     """占位：模板已在 import 时注册（保证 blueteam 导入路径一致）。"""

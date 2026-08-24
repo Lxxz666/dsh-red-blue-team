@@ -138,6 +138,7 @@ class EngineConfig:
     max_errors: int = 20               # 连续/累计错误上限 → 终止扫描
     samples_limit: int = 0             # 0 = 不限（bench 预算用）
     agent_mode: bool = True            # 主Agent+子Agent 编排（关闭=单进程直跑）
+    llm_followup: bool = False         # V9-lite：LLM 分析未命中向量生成针对性攻击链并补打（需 DeepSeek）
 
 
 @dataclass
@@ -248,6 +249,7 @@ class ScanConfig:
             max_errors=max(1, int(engine.get("max_errors", 20))),
             samples_limit=max(0, int(engine.get("samples_limit", 0))),
             agent_mode=bool(engine.get("agent_mode", True)),
+            llm_followup=bool(engine.get("llm_followup", False)),
         )
         cfg.out_dir = str(raw.get("out_dir", "./reports"))
         cfg.validate()

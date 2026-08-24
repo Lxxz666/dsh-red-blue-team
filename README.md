@@ -7,7 +7,7 @@
 
 ![CI](https://github.com/Lxxz666/dsh-red-blue-team/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-334%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-342%20passed-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 **别的工具告诉你"哪里可能有问题"，dsh-red-blue-team 直接攻击给你看，然后修好它，再攻击一遍证明修好了。**
@@ -47,7 +47,11 @@ python -m redteam.cli scan --config examples/scan_mcp.yaml
 # ⑤ Web 面板：网页发起扫描/看漏洞/跑修复（默认自动挂内置靶场）
 python -m redteam.cli web --port 8766
 
-# ⑥ 业务场景库 / 攻击样本库 / 自适应基准
+# ⑥ 多目标批扫 / 定时扫描
+python -m redteam.cli batch --targets examples/targets.yml
+python -m redteam.cli schedule --config examples/scan_lab.yaml --every 24h --webhook <URL>
+
+# ⑦ 业务场景库 / 攻击样本库 / 自适应基准
 python -m redteam.cli scenarios list
 python -m redteam.cli samples list
 python -m redteam.cli bench --config examples/scan_lab.yaml
@@ -62,7 +66,7 @@ python -m redteam.cli bench --config examples/scan_lab.yaml
 | 埋入漏洞发现率 | **37/37 = 100%** | 内置靶场 37 个埋入漏洞（验收线 ≥80%），`test_scan_e2e` 每次 CI 强制 |
 | 误报率（全加固靶场复扫） | **0 命中** | 修复完成的靶场复扫必须清零，否则 CI 失败 |
 | 修复闭环 | **89 命中 → 89 修复 → 89 回归通过 → 复扫 0 命中** | 蓝队自动修复+回归验证，同一攻击重跑必须清零 |
-| 测试规模 | **334 passed**（框架 224 + 红蓝队 110） | 判定/靶场/场景/静态/多Agent/MCP/攻击链/Web面板/回归全链路，GitHub Actions 双 Python 版本 |
+| 测试规模 | **342 passed**（框架 224 + 红蓝队 118） | 判定/靶场/场景/静态/多Agent/MCP/攻击链/Web面板/批扫/定时/回归全链路，GitHub Actions 双 Python 版本 |
 | 扫描确定性 | 两次扫描命中集合**完全一致** | 状态型样本串行通道+重置隔离，报告可复现审计 |
 | 自适应收益（wanter 地形） | 25% 预算下命中率 **+10.5%**，覆盖效率提速 **+9.0%** | bench 命令：随机基线 vs 地形序二次扫描对比 |
 | 检测面 | **71 条基础样本 × 54 个攻击类别** | D1 Web / D2 API / D3 LLM / D7 配置 + D19 业务场景 + MCP 工具面 |
@@ -179,8 +183,11 @@ dsh-red-blue-team/
 - [x] V7 多轮攻击链编排：静态链模板（铺垫诱导）+ LLM 链生成（opt-in），全链入审计与报告
 - [x] V8 Web 面板：FastAPI + 原生 JS（扫描任务/漏洞清单/报告/蓝队修复，`dsh-redteam web` 一键起）
 - [x] CI 自动化：GitHub Actions 双 Python 版本全量测试 + 靶场验收 job
-- [ ] V9 子Agent 升级为完整 LLM agent loop（LLM 驱动的自主攻击链编排）
-- [ ] V10 定时扫描与报告推送
+- [x] V9 LLM 定向补打轮（opt-in）：分析首轮未命中向量 → LLM 生成针对性攻击链 → 第二轮补打
+- [x] V10 定时扫描 + 多目标批扫：`schedule`（周期扫描/报告留存/webhook 推送）、
+  `batch`（targets.yml 串行扫描 + 风险排序汇总）；静态规则扩展至 21 条（npm CVE-lite/JWT 弱密钥/明文 HTTP/Terraform/K8s/Java/Go/令牌文件）
+- [ ] V11 子Agent 升级为完整 LLM agent loop（LLM 驱动的自主攻击决策）
+- [ ] V12 报告推送渠道扩展（邮件/IM）
 
 ## 📄 License
 
