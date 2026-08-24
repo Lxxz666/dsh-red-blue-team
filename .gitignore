@@ -18,9 +18,13 @@ examples/*.svg
 # 红蓝队运行产物（扫描数据库/审计/报告/靶场状态）
 *.db
 *.db-journal
-audit/
-reports/
-sandbox/
+/audit/
+/reports/
+/sandbox/            # 仅根目录（蓝队修复沙箱产物）；dsh/sandbox 是框架模块，见下方反排除
+!/sandbox/
+!dsh/sandbox/
+!dsh/sandbox/**
+dsh/sandbox/__pycache__/
 demo_out*/
 demo_final/
 demo_static_out/
