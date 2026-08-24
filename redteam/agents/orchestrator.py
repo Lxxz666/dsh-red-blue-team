@@ -44,6 +44,7 @@ class AttackOrchestrator:
         self.order = order
         self.scan_id = new_id("scan")
         self.scenarios: List[str] = []
+        self.llm_agent_report = ""     # V11：LLM 自主攻击 Agent 的最终报告
 
     # ---- 主流程 ----
 
@@ -114,6 +115,29 @@ class AttackOrchestrator:
                         "samples": len(followup_samples)})
                     verdicts = list(verdicts) + \
                         await self._dispatch_attack_workers(followup_samples)
+            # ④c V11 LLM 自主攻击 Agent（完整 dsh agent loop，opt-in）
+            if cfg.engine.llm_agent and self.adapter is not None and samples:
+                from .llm_agent import LlmAttackAgent
+                summary = self._scan_summary_for_llm(verdicts, samples)
+                llm_result = await LlmAttackAgent(
+                    rt, cfg, self.adapter, summary, scan_id=self.scan_id,
+                    timeout_s=cfg.engine.llm_agent_timeout_s).run()
+                if llm_result.verdicts:
+                    ctx.emit("agent/dispatched", {
+                        "agent": "llm-attacker", "task": "LLM 自主攻击",
+                        "samples": len(llm_result.verdicts)})
+                    for index, verdict in enumerate(llm_result.verdicts):
+                        rt.storage.record_attack(
+                            self.scan_id, verdict,
+                            verdict.evidence[:500])
+                        if rt.terrain is not None and index < len(
+                                llm_result.samples):
+                            rt.terrain.record(llm_result.samples[index],
+                                              verdict.verdict)
+                    samples = list(samples) + llm_result.samples
+                    verdicts = list(verdicts) + llm_result.verdicts
+                if llm_result.final_report:
+                    self.llm_agent_report = llm_result.final_report
             result.verdicts = verdicts
 
             # ⑤ 汇总：漏洞落库（动态 + 静态）
@@ -339,6 +363,19 @@ class AttackOrchestrator:
                      missed, len(additions))
         return additions
 
+    def _scan_summary_for_llm(self, verdicts: List[VerdictResult],
+                              samples: List[ConcreteSample]) -> str:
+        """给 LLM 攻击 Agent 的扫描摘要（决策依据）。"""
+        tried = {v.category for v in verdicts}
+        hit = {v.category for v in verdicts if v.success}
+        missed = sorted(tried - hit)
+        lines = [f"目标: {self.cfg.target.name}", f"样本数: {len(samples)}",
+                 f"已执行: {len(verdicts)} 次攻击，成功 "
+                 f"{sum(1 for v in verdicts if v.success)} 次",
+                 "已命中类别: " + ("、".join(sorted(hit)) or "无"),
+                 "未命中类别: " + ("、".join(missed) or "无")]
+        return "\n".join(lines)
+
     async def _dispatch_attack_workers(self, samples: List[ConcreteSample]
                                        ) -> List[VerdictResult]:
         cfg, rt, ctx = self.cfg, self.runtime, self.runtime.ctx
@@ -424,6 +461,9 @@ class AttackOrchestrator:
         text += f" 业务场景：{scenario_text}。"
         text += (" 命中漏洞类别：" + "、".join(categories[:8]) +
                  ("…" if len(categories) > 8 else "") + "。")
+        if self.llm_agent_report:
+            text += ("\n\n[LLM 自主攻击 Agent 报告] "
+                     + self.llm_agent_report[:600])
         llm = self.runtime.llm
         if not llm or "deepseek" not in llm.providers():
             return text

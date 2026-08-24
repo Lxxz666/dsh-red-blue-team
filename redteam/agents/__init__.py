@@ -6,13 +6,15 @@
 - ReconAgent（侦察子 Agent）：探测目标能力/端点/业务场景指纹；
 - StaticAgent（静态子 Agent）：本地文件夹代码级审计；
 - AttackWorkerAgent（攻击子 Agent）：每个子 Agent 在自己的 dsh scoped Context
-  中执行一组攻击样本（按角色分组），并行运行，返回结构化报告给主 Agent。
+  中执行一组攻击样本（按角色分组），并行运行，返回结构化报告给主 Agent；
+- LlmAttackAgent（V11）：完整 dsh agent loop 的 LLM 自主攻击 Agent（opt-in）。
 
 并发与安全：全局 semaphore 限制并发、副作用样本经共享串行通道 + 状态重置，
 子 Agent 之间互不污染（dsh scoped ctx 隔离 + 靶场 reset 隔离）。
 """
+from .llm_agent import LlmAgentResult, LlmAttackAgent
 from .orchestrator import AttackOrchestrator
 from .worker import (AttackWorkerAgent, ReconAgent, StaticAgent, WorkerReport)
 
 __all__ = ["AttackOrchestrator", "AttackWorkerAgent", "ReconAgent",
-           "StaticAgent", "WorkerReport"]
+           "StaticAgent", "WorkerReport", "LlmAttackAgent", "LlmAgentResult"]

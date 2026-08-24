@@ -139,6 +139,8 @@ class EngineConfig:
     samples_limit: int = 0             # 0 = 不限（bench 预算用）
     agent_mode: bool = True            # 主Agent+子Agent 编排（关闭=单进程直跑）
     llm_followup: bool = False         # V9-lite：LLM 分析未命中向量生成针对性攻击链并补打（需 DeepSeek）
+    llm_agent: bool = False            # V11：LLM 自主攻击 Agent（完整 dsh agent loop，需 DeepSeek）
+    llm_agent_timeout_s: float = 120.0  # LLM Agent 循环超时（防失控）
 
 
 @dataclass
@@ -250,6 +252,8 @@ class ScanConfig:
             samples_limit=max(0, int(engine.get("samples_limit", 0))),
             agent_mode=bool(engine.get("agent_mode", True)),
             llm_followup=bool(engine.get("llm_followup", False)),
+            llm_agent=bool(engine.get("llm_agent", False)),
+            llm_agent_timeout_s=float(engine.get("llm_agent_timeout_s", 120.0)),
         )
         cfg.out_dir = str(raw.get("out_dir", "./reports"))
         cfg.validate()

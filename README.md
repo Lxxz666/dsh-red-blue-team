@@ -7,7 +7,7 @@
 
 ![CI](https://github.com/Lxxz666/dsh-red-blue-team/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-353%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-357%20passed-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 **别的工具告诉你"哪里可能有问题"，dsh-red-blue-team 直接攻击给你看，然后修好它，再攻击一遍证明修好了。**
@@ -66,7 +66,7 @@ python -m redteam.cli bench --config examples/scan_lab.yaml
 | 埋入漏洞发现率 | **53/53 = 100%** | 内置靶场 53 个埋入漏洞（验收线 ≥80%），`test_scan_e2e` 每次 CI 强制 |
 | 误报率（全加固靶场复扫） | **0 命中** | 修复完成的靶场复扫必须清零，否则 CI 失败 |
 | 修复闭环 | **89 命中 → 89 修复 → 89 回归通过 → 复扫 0 命中** | 蓝队自动修复+回归验证，同一攻击重跑必须清零 |
-| 测试规模 | **353 passed**（框架 224 + 红蓝队 129） | 判定/靶场/场景/静态/多Agent/MCP/攻击链/Web面板/批扫/定时/回归全链路，GitHub Actions 双 Python 版本 |
+| 测试规模 | **357 passed**（框架 224 + 红蓝队 133） | 判定/靶场/场景/静态/多Agent/MCP/攻击链/LLM自主Agent/Web面板/批扫/定时/回归全链路，GitHub Actions 双 Python 版本 |
 | 扫描确定性 | 两次扫描命中集合**完全一致** | 状态型样本串行通道+重置隔离，报告可复现审计 |
 | 自适应收益（wanter 地形） | 25% 预算下命中率 **+10.5%**，覆盖效率提速 **+9.0%** | bench 命令：随机基线 vs 地形序二次扫描对比 |
 | 检测面 | **71 条基础样本 × 54 个攻击类别** | D1 Web / D2 API / D3 LLM / D7 配置 + D19 业务场景 + MCP 工具面 |
@@ -156,7 +156,7 @@ dsh-red-blue-team/
 │                        #   adaptive(wanter地形) adapters(http/sdk/mcp) engine storage audit runtime config models
 ├── target_lab/          # 内置靶场（53 埋入漏洞 + 12 大业务场景 API + 可修复 guards）
 ├── sample_bank/         # 71 条攻击样本（YAML，四大检测面 + 12 业务场景 + MCP 工具面 + 多轮链模板）
-├── tests/ + tests_redteam/  # 353 项测试（含发现率≥80%、零误报、回归清零、MCP/攻击链/Web 验收）
+├── tests/ + tests_redteam/  # 357 项测试（含发现率≥80%、零误报、回归清零、MCP/攻击链/LLM自主Agent/Web 验收）
 ├── .github/workflows/   # GitHub Actions CI（双 Python 版本全量测试 + 靶场验收）
 ├── examples/  docs/     # 示例配置（网址/文件夹/MCP）/ 架构·用户·攻击目录·场景·合规文档
 └── README.md
@@ -189,7 +189,11 @@ dsh-red-blue-team/
   `batch`（targets.yml 串行扫描 + 风险排序汇总）；静态规则扩展至 21 条（npm CVE-lite/JWT 弱密钥/明文 HTTP/Terraform/K8s/Java/Go/令牌文件）
 - [x] V12 报告推送：`scan`/`fix`/`schedule` 支持 `--webhook` POST JSON 摘要
   （可接钉钉/企微/邮件网关）；`report --remediation` 查看完整修复报告
-- [ ] V11 子Agent 升级为完整 LLM agent loop（LLM 驱动的自主攻击决策）
+- [x] V11 子Agent 升级为完整 LLM agent loop：`engine.llm_agent: true` 时，
+  LLM 作为自主攻击决策者（attack_vector/finalize_report 工具）在 dsh agent
+  loop 中循环攻击-观察-调整并提交攻击报告；无 LLM 优雅降级，次数/超时双重上限
+- [x] **Roadmap 全部完成**：红队（多检测面×多场景×多Agent×LLM 自主）→ 蓝队
+  （修复-回归-报告）→ 产品化（Web 面板/批扫/定时/推送/CI）闭环
 
 ## 📄 License
 

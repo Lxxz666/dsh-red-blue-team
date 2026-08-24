@@ -102,6 +102,20 @@ vectors:
 生成语义等价、措辞不同的攻击载荷变体；LLM 失败/离线时静默降级为静态变体，
 验收指标（发现率/零误报）不依赖 LLM。
 
+### LLM 自主攻击 Agent（V11，opt-in）
+
+```yaml
+engine:
+  llm_agent: true                  # LLM 在完整 dsh agent loop 中自主攻击决策
+  llm_agent_timeout_s: 120         # 循环超时（另有 20 次攻击上限）
+```
+
+开启后（需 `DEEPSEEK_API_KEY`），扫描首轮结束后主 Agent 派发 **LLM 自主攻击
+Agent**：LLM 读取扫描摘要，持 `attack_vector`（发起攻击并返回判定）与
+`finalize_report`（提交结论）两个工具，在 dsh agent loop 中自主
+"攻击 → 观察判定 → 调整载荷 → 再攻击"，最终提交攻击报告并入扫描结果
+（判定/落库/审计/态势综述）。无 LLM 时优雅降级为空操作，不产生任何攻击。
+
 ### 对接真实 HTTP 目标协议约定
 
 - 对话接口：`POST {base_url}/api/chat`，body `{"messages":[{"role":"user","content":"..."}],
