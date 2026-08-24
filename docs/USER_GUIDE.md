@@ -11,6 +11,18 @@ pip install -e .                       # 可选：安装 dsh-redteam / dsh-pytho
 无需 API Key 即可运行：判定器是确定性的，内置靶场不依赖真实 LLM。
 配置 `DEEPSEEK_API_KEY` 后自动启用 DeepSeek 适配器（LLM 弱信号裁判/攻击态势综述）。
 
+推荐写法：在项目根目录 `.env` 配置（面板/CLI 启动时自动加载，已存在的环境变量优先）：
+
+```bash
+DEEPSEEK_API_KEY=ark-xxxx              # 火山方舟 API Key
+DEEPSEEK_BASE_URL=https://ark.cn-beijing.volces.com/api/plan/v3   # Agent Plan 端点
+DEEPSEEK_MODEL=deepseek-v4-flash       # 模型名
+DEEPSEEK_DISABLE_THINKING=1            # 关闭思考模式，让工具循环直接输出 content
+```
+
+Web 面板顶部徽标显示「LLM 已就绪（模型名）」时，三个 LLM 开关（自主攻击/主动侦察/修复建议）
+自动解锁；显示「LLM 未配置」则只会跑确定性引擎。
+
 ## 2. 三种目标输入
 
 | 模式 | 命令 | 适用 |

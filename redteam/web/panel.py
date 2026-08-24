@@ -19,8 +19,14 @@ from typing import Any, Dict, Optional
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
+from .._env import load_dotenv
 from ..config import ScanConfig
 from .taskrunner import TaskRunner
+
+# 面板启动即加载项目 .env（DEEPSEEK_* 凭据）——
+# 否则 /api/config 的 llm_available 在 runtime 尚未导入时为 False，
+# 前端会把三个 LLM 开关全部禁用。
+load_dotenv()
 
 _INDEX_HTML = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                            "static", "index.html")
@@ -58,7 +64,8 @@ def create_app(cfg: ScanConfig, runtime_dir: str,
                 "base_url": (target.folder_path if target.type == "folder"
                              else target.base_url),
                 "scenario": target.scenario, "roles": target.roles,
-                "llm_available": _llm_available()}
+                "llm_available": _llm_available(),
+                "llm_model": os.environ.get("DEEPSEEK_MODEL", "")}
 
     # ---- 任务创建 ----
 

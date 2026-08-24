@@ -764,7 +764,8 @@ async function init() {
   } catch {}
   if (state.llmAvailable) {
     $("llmBadge").classList.add("on");
-    $("llmBadge").innerHTML = '<span class="dot"></span>LLM 已就绪（DeepSeek）';
+    $("llmBadge").innerHTML = '<span class="dot"></span>LLM 已就绪（' +
+      esc(cfg.llm_model || "DeepSeek") + '）';
   } else {
     $("llmBadge").innerHTML = '<span class="dot"></span>LLM 未配置（仅确定性引擎）';
     ["tgAgent", "tgExplorer", "tgFixPlan"].forEach((id) => {
