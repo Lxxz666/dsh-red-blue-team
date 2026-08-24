@@ -142,6 +142,8 @@ class EngineConfig:
     llm_agent: bool = False            # V11：LLM 自主攻击 Agent（确定性多轮驱动循环，需 DeepSeek）
     llm_agent_max_attacks: int = 100   # LLM 自主攻击次数上限（可调大）
     llm_agent_timeout_s: float = 600.0  # LLM Agent 循环超时（防失控）
+    llm_explorer_tools: bool = False   # LLM 主动侦察工具（http_probe/http_attack，不限于预定义场景）
+    llm_fix_plan: bool = False         # 蓝队 LLM 修复建议（每条漏洞生成 AI 修复方案，需 DeepSeek）
 
 
 @dataclass
@@ -258,6 +260,8 @@ class ScanConfig:
                 1, int(engine.get("llm_agent_max_attacks", 100))),
             llm_agent_timeout_s=float(engine.get(
                 "llm_agent_timeout_s", 600.0)),
+            llm_explorer_tools=bool(engine.get("llm_explorer_tools", False)),
+            llm_fix_plan=bool(engine.get("llm_fix_plan", False)),
         )
         cfg.out_dir = str(raw.get("out_dir", "./reports"))
         cfg.validate()

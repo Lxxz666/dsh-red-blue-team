@@ -1,210 +1,48 @@
 """redteam.web.panel —— Web 面板（FastAPI，复用 dsh 依赖栈）。
 
-提供：
-- POST /api/scans            启动一次红队扫描（后台任务，串行队列）
-- GET  /api/scans            扫描任务列表（状态/命中/漏洞数）
-- GET  /api/scans/{id}       单任务详情（含漏洞清单）
-- GET  /api/scans/{id}/report 攻击报告（Markdown）
-- POST /api/scans/{id}/fix   蓝队修复+回归（lab 目标自动应用）
-- GET  /api/scans/{id}/remediation 完整修复报告（Markdown）
-- GET  /                       面板页面（原生 JS，无构建）
-
-扫描任务在后台 asyncio 串行执行（同一靶场一次一测，避免状态污染）。
+面向验收的核心面板：
+- POST /api/tasks            {name, url, llm_agent, llm_explorer, blue_fix}
+                             创建网址扫描任务（授权闸门照常生效）
+- POST /api/tasks/upload     原始 ZIP 体（?name=项目名）→ 解压解析 → 静态扫描任务
+- GET  /api/tasks            任务列表（状态/步骤进度/漏洞数）
+- GET  /api/tasks/{id}       任务详情：步骤时间线 + 日志（?after=N 增量拉取）
+- POST /api/tasks/{id}/fix   蓝队修复（已扫描任务）
+- GET  /api/tasks/{id}/report|remediation  攻击/修复报告（Markdown）
+- GET  /                       精致前端（static/index.html）
 """
 from __future__ import annotations
 
-import asyncio
-import json
-import logging
 import os
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from ..config import ScanConfig
-
-log = logging.getLogger("redteam.web")
+from .taskrunner import TaskRunner
 
 _INDEX_HTML = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                            "static", "index.html")
 
 
-class ScanTaskManager:
-    """后台扫描任务注册表（串行队列）。"""
-
-    def __init__(self, cfg: ScanConfig, lab=None) -> None:
-        self.cfg = cfg
-        self.lab = lab
-        self.tasks: Dict[str, Dict[str, Any]] = {}
-        self._seq = 0
-        self._queue: asyncio.Queue = asyncio.Queue()
-        self._worker: Optional[asyncio.Task] = None
-
-    def start(self) -> None:
-        self._worker = asyncio.get_running_loop().create_task(self._run_queue())
-
-    async def close(self) -> None:
-        if self._worker is not None:
-            self._worker.cancel()
-            try:
-                await self._worker
-            except asyncio.CancelledError:
-                pass
-        if self.lab is not None:
-            self.lab.stop()
-
-    # ---- 队列 ----
-
-    def submit(self) -> str:
-        self._seq += 1
-        task_id = f"task-{self._seq:03d}"
-        self.tasks[task_id] = {"task_id": task_id, "status": "queued",
-                               "scan_id": None, "started_at": None,
-                               "finished_at": None, "error": None,
-                               "result": None, "remediation": None}
-        self._queue.put_nowait(task_id)
-        return task_id
-
-    async def _run_queue(self) -> None:
-        while True:
-            task_id = await self._queue.get()
-            await self._run_scan(task_id)
-
-    async def _run_scan(self, task_id: str) -> None:
-        task = self.tasks[task_id]
-        task["status"] = "running"
-        task["started_at"] = time.time()
-        runtime = None
-        adapter = None
-        try:
-            from ..runtime import RedTeamRuntime
-            from ..engine import ScanRunner, build_adapter
-            runtime = RedTeamRuntime(self.cfg)
-            await runtime.start()
-            adapter = build_adapter(self.cfg)
-            result = await ScanRunner(runtime, self.cfg, adapter,
-                                      scan_mode="web").run()
-            task["result"] = {
-                "scan_id": result.scan_id,
-                "target": result.target,
-                "total": result.total,
-                "success": result.success_count,
-                "suspicious": result.suspicious_count,
-                "findings": [
-                    {"finding_id": f.finding_id, "category": f.category,
-                     "severity": f.severity, "role": f.role,
-                     "sample_id": f.sample_id, "evidence": f.evidence[:200],
-                     "fix_plan": f.fix.get("plan", "")}
-                    for f in result.findings],
-                "severity_counts": result.severity_counts(),
-                "report_path": result.report_path,
-                "report_json_path": result.report_json_path,
-            }
-            task["scan_id"] = result.scan_id
-            task["status"] = "finished"
-        except Exception as exc:
-            log.exception("面板扫描任务 %s 失败", task_id)
-            task["status"] = "failed"
-            task["error"] = str(exc)
-        finally:
-            if adapter is not None:
-                try:
-                    await adapter.close()
-                except Exception:
-                    pass
-            if runtime is not None:
-                try:
-                    await runtime.close()
-                except Exception:
-                    pass
-            task["finished_at"] = time.time()
-
-    # ---- 查询 ----
-
-    def list_tasks(self) -> List[Dict[str, Any]]:
-        out = []
-        for task in self.tasks.values():
-            row = {k: task[k] for k in ("task_id", "status", "scan_id",
-                                        "started_at", "finished_at", "error")}
-            result = task.get("result") or {}
-            row.update({"target": result.get("target", self.cfg.target.name),
-                        "total": result.get("total"),
-                        "success": result.get("success"),
-                        "findings": len(result.get("findings") or [])})
-            out.append(row)
-        return out
-
-    def get_task(self, task_id: str) -> Dict[str, Any]:
-        if task_id not in self.tasks:
-            raise KeyError(task_id)
-        return self.tasks[task_id]
-
-    async def run_fix(self, task_id: str) -> str:
-        """蓝队修复+回归，返回修复报告路径。"""
-        task = self.get_task(task_id)
-        result = task.get("result")
-        if not result:
-            raise RuntimeError("扫描尚未完成")
-        if task.get("remediation"):
-            return task["remediation"]
-        from ..runtime import RedTeamRuntime
-        from ..engine import build_adapter
-        from ..blueteam import BlueEngine
-        runtime = RedTeamRuntime(self.cfg)
-        await runtime.start()
-        adapter = None
-        try:
-            adapter = build_adapter(self.cfg)
-            from ..cli import _load_scan_result
-            scan_result = await _load_scan_result(runtime, runtime.storage,
-                                                  result["scan_id"])
-            outcome = await BlueEngine(runtime, self.cfg, adapter,
-                                       scan_result).run(apply_fixes=True)
-            task["remediation"] = outcome.remediation_path
-            task["fix_summary"] = outcome.summary()
-            return outcome.remediation_path
-        finally:
-            if adapter is not None:
-                await adapter.close()
-            await runtime.close()
-
-    def report_text(self, task_id: str) -> str:
-        task = self.get_task(task_id)
-        result = task.get("result")
-        if not result or not result.get("report_path"):
-            raise RuntimeError("报告尚未生成")
-        path = result["report_path"]
-        if not os.path.exists(path):
-            raise RuntimeError(f"报告文件不存在: {path}")
-        with open(path, encoding="utf-8") as fh:
-            return fh.read()
-
-    def remediation_text(self, task_id: str) -> str:
-        task = self.get_task(task_id)
-        path = task.get("remediation")
-        if not path or not os.path.exists(path):
-            raise RuntimeError("修复报告尚未生成（先调用 POST /fix）")
-        with open(path, encoding="utf-8") as fh:
-            return fh.read()
-
-
-def create_app(cfg: ScanConfig, lab=None) -> FastAPI:
-    manager = ScanTaskManager(cfg, lab)
+def create_app(cfg: ScanConfig, runtime_dir: str,
+               lab=None) -> FastAPI:
+    runner = TaskRunner(cfg, runtime_dir, lab=lab)
+    os.makedirs(runtime_dir, exist_ok=True)
 
     from contextlib import asynccontextmanager
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        manager.start()
+        runner.start()
         try:
             yield
         finally:
-            await manager.close()
+            await runner.close()
 
     app = FastAPI(title="dsh-red-blue-team 面板", lifespan=lifespan)
-    app.state.manager = manager  # 供测试/嵌入式使用直接驱动任务管理器
+    app.state.runner = runner
 
     @app.get("/", response_class=HTMLResponse)
     async def index():
@@ -219,50 +57,147 @@ def create_app(cfg: ScanConfig, lab=None) -> FastAPI:
         return {"target": target.name, "type": target.type,
                 "base_url": (target.folder_path if target.type == "folder"
                              else target.base_url),
-                "scenario": target.scenario, "roles": target.roles}
+                "scenario": target.scenario, "roles": target.roles,
+                "llm_available": _llm_available()}
 
-    @app.post("/api/scans")
-    async def start_scan():
-        task_id = manager.submit()
+    # ---- 任务创建 ----
+
+    @app.post("/api/tasks")
+    async def create_task(payload: Dict[str, Any]):
+        name = str(payload.get("name") or "未命名目标").strip()[:60]
+        url = str(payload.get("url") or "").strip()
+        if not url:
+            raise HTTPException(status_code=400, detail="请输入目标网址")
+        if not url.startswith(("http://", "https://")):
+            raise HTTPException(status_code=400,
+                                detail="网址需以 http:// 或 https:// 开头")
+        try:
+            runner.check_url_allowed(url)
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc))
+        try:
+            task_id = runner.submit(
+                name=name, target_url=url,
+                llm_agent=bool(payload.get("llm_agent")),
+                llm_explorer=bool(payload.get("llm_explorer")),
+                llm_fix_plan=bool(payload.get("llm_fix_plan")),
+                blue_fix=bool(payload.get("blue_fix")))
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc))
         return {"task_id": task_id, "status": "queued"}
 
-    @app.get("/api/scans")
-    async def list_scans():
-        return {"tasks": manager.list_tasks()}
-
-    @app.get("/api/scans/{task_id}")
-    async def task_detail(task_id: str):
+    @app.post("/api/tasks/upload")
+    async def upload_project(request: Request, name: str = Query("上传项目"),
+                             llm_fix_plan: bool = Query(False)):
+        body = await request.body()
+        if not body or len(body) > 50 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="上传体为空或超过 50MB")
         try:
-            task = manager.get_task(task_id)
-        except KeyError:
+            project_dir = runner.extract_project(body, name)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"压缩包解析失败: {exc}")
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"压缩包解析失败: {exc}")
+        task_id = runner.submit(
+            name=str(name)[:60], project_dir=project_dir,
+            llm_fix_plan=bool(llm_fix_plan), blue_fix=False)
+        return {"task_id": task_id, "status": "queued",
+                "project_dir": project_dir}
+
+    # ---- 任务查询 ----
+
+    @app.get("/api/tasks")
+    async def list_tasks():
+        rows = []
+        for task in runner.tasks.values():
+            result = task.get("result") or {}
+            steps = task.get("steps") or []
+            current = next((s["name"] for s in reversed(steps)
+                            if s["status"] == "running"), None)
+            rows.append({
+                "task_id": task["task_id"], "name": task["name"],
+                "status": task["status"], "target": task["target"],
+                "current_step": current,
+                "step_total": len(steps),
+                "step_done": sum(1 for s in steps
+                                 if s["status"] in ("finished", "skipped")),
+                "total": result.get("total"),
+                "success": result.get("success"),
+                "findings": len(result.get("findings") or []),
+                "severity_counts": result.get("severity_counts"),
+                "error": task.get("error"),
+                "created_at": task.get("created_at"),
+                "llm_agent": task.get("llm_agent"),
+            })
+        rows.sort(key=lambda r: -(r.get("created_at") or 0))
+        return {"tasks": rows}
+
+    @app.get("/api/tasks/{task_id}")
+    async def task_detail(task_id: str, after: int = Query(0, ge=0)):
+        task = runner.tasks.get(task_id)
+        if task is None:
             raise HTTPException(status_code=404, detail="任务不存在")
-        return {"task": {k: v for k, v in task.items()
-                         if k != "result"},
-                "result": task.get("result")}
+        logs = task.get("logs") or []
+        return {
+            "task": {
+                "task_id": task["task_id"], "name": task["name"],
+                "status": task["status"], "target": task["target"],
+                "error": task.get("error"),
+                "scan_id": task.get("scan_id"),
+                "created_at": task.get("created_at"),
+                "started_at": task.get("started_at"),
+                "finished_at": task.get("finished_at"),
+                "remediation": task.get("remediation"),
+                "probe": task.get("probe"),
+                "llm_agent": task.get("llm_agent"),
+            },
+            "steps": task.get("steps") or [],
+            "logs": logs[after:],
+            "log_count": len(logs),
+            "result": task.get("result"),
+        }
 
-    @app.get("/api/scans/{task_id}/report")
+    # ---- 报告与修复 ----
+
+    @app.get("/api/tasks/{task_id}/report")
     async def task_report(task_id: str):
-        try:
-            text = manager.report_text(task_id)
-        except (KeyError, RuntimeError) as exc:
-            raise HTTPException(status_code=404, detail=str(exc))
-        return PlainTextResponse(text, media_type="text/markdown")
+        task = runner.tasks.get(task_id)
+        if task is None or not task.get("result"):
+            raise HTTPException(status_code=404, detail="报告尚未生成")
+        path = task["result"].get("report_path")
+        if not path or not os.path.exists(path):
+            raise HTTPException(status_code=404, detail="报告文件不存在")
+        with open(path, encoding="utf-8") as fh:
+            return PlainTextResponse(fh.read(), media_type="text/markdown")
 
-    @app.post("/api/scans/{task_id}/fix")
+    @app.post("/api/tasks/{task_id}/fix")
     async def task_fix(task_id: str):
-        try:
-            path = await manager.run_fix(task_id)
-        except (KeyError, RuntimeError) as exc:
-            raise HTTPException(status_code=409, detail=str(exc))
-        return {"remediation_path": path,
-                "fix_summary": manager.get_task(task_id).get("fix_summary")}
+        task = runner.tasks.get(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="任务不存在")
+        if not task.get("result"):
+            raise HTTPException(status_code=409, detail="扫描尚未完成")
+        await runner._run_fix_now(task)
+        return {"remediation": task.get("remediation"),
+                "fix_summary": task.get("fix_summary")}
 
-    @app.get("/api/scans/{task_id}/remediation")
+    @app.get("/api/tasks/{task_id}/remediation")
     async def task_remediation(task_id: str):
-        try:
-            text = manager.remediation_text(task_id)
-        except (KeyError, RuntimeError) as exc:
-            raise HTTPException(status_code=404, detail=str(exc))
-        return PlainTextResponse(text, media_type="text/markdown")
+        task = runner.tasks.get(task_id)
+        path = task.get("remediation") if task else None
+        if not path or not os.path.exists(path):
+            raise HTTPException(status_code=404,
+                                detail="修复报告尚未生成（先调用 POST /fix）")
+        with open(path, encoding="utf-8") as fh:
+            return PlainTextResponse(fh.read(), media_type="text/markdown")
 
     return app
+
+
+def _llm_available() -> bool:
+    """DeepSeek 密钥是否可用（.env / 环境变量）。"""
+    try:
+        from dsh.llm.deepseek import DeepSeekAdapter
+        return bool(DeepSeekAdapter().api_key)
+    except Exception:
+        return False

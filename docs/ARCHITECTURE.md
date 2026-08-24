@@ -10,15 +10,17 @@ dsh-red-blue-team 是 **dsh-python 框架之上的二次开发层**：不修改�
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ 接入层   dsh-redteam CLI                                    │
+│ 接入层   dsh-redteam CLI + Web 面板（FastAPI，任务步骤/日志追踪）  │
 │  scan(网址) / static(文件夹) / fix / lab / report / bench   │
-│  demo / samples / scenarios     +   examples/run_demo.py    │
+│  demo / samples / scenarios / web / batch / schedule        │
 ├─────────────────────────────────────────────────────────────┤
 │ 主Agent 编排层 redteam/agents/                               │
 │  AttackOrchestrator（主Agent：计划→派发→汇总→攻击报告）       │
 │  ├── ReconAgent（侦察子Agent：能力/端点/业务场景指纹）        │
 │  ├── StaticAgent（静态子Agent：文件夹代码级审计）             │
-│  └── AttackWorkerAgent × N（攻击子Agent：按角色分组并行攻击） │
+│  ├── AttackWorkerAgent × N（攻击子Agent：按角色分组并行攻击） │
+│  └── LlmAttackAgent（LLM 自主攻击：确定性多轮循环，          │
+│       可选 http_probe/http_attack 主动侦察工具）             │
 ├─────────────────────────────────────────────────────────────┤
 │ 红蓝队能力层 redteam/                                        │
 │  scenarios(12大业务场景指纹) static(静态规则引擎)             │
@@ -116,14 +118,30 @@ domain 分区 = 目标类型×业务域；持久化 = SQLite JSON 快照。
 ## 7. 蓝队完整修复闭环与修复报告
 
 ```
-漏洞报告(JSON) → ① FixPlanner: 修复模板库(51类) → 每条漏洞:
+漏洞报告(JSON) → ① FixPlanner: 修复模板库(68类) → 每条漏洞:
                     问题说明(现象/根因/影响) + 分步修复 + 代码级before/after
                     + 验证步骤 + 修复理由(审计)
+                    [+ engine.llm_fix_plan: LLM 逐条生成 AI 修复建议
+                       → finding.fix.ai_plan / plan.ai_note，进修复报告]
                → ② FixExecutor: lab 目标沙箱应用(备份/版本化/热重载)
                     外部目标只出方案(manual_only)
                → ③ RegressionRunner: 同攻击样本复测必须清零; 未清零→回滚
                → ④ remediation_<target>.md: 完整修复报告(交付物)
 ```
+
+## 7½. Web 面板 v2（redteam/web/）
+
+- `panel.py`：FastAPI 应用——`POST /api/tasks`（网址 + LLM 模式开关）、
+  `POST /api/tasks/upload`（原始 ZIP 体 → 防 zip-slip 解压 → 静态扫描）、
+  `GET /api/tasks`（列表/进度）、`GET /api/tasks/{id}?after=N`（步骤时间线 +
+  增量日志）、`GET …/report|remediation`、`POST …/fix`；
+- `taskrunner.py`：任务管线执行器（串行队列）——每条任务的 `steps`
+  （prepare/recon/attack/fix，状态+起止时间+摘要）与 `logs`（订阅 dsh 事件总线：
+  `attack/executed`/`attack/verdict`/`finding/detected`/`fix/…` 实时成行，
+  内存环形 2000 条 + `web_runtime/tasks/<id>.jsonl` 落盘可回放）；
+- 授权闸门：非本地网址且无 `authorization` 配置块 → 创建任务即 403；
+- 前端：`static/index.html` 单文件原生 JS 暗色仪表盘（无外部依赖，离线可用）——
+  网址输入/拖拽上传/任务卡片/步骤时间线/日志控制台/漏洞表/Markdown 报告渲染/一键修复。
 
 ## 8. 端到端核心流程
 
@@ -149,6 +167,14 @@ domain 分区 = 目标类型×业务域；持久化 = SQLite JSON 快照。
 - `test_mcp`：易受攻击 MCP 服务器（工具滥用/越权/投毒全检出）、对话样本跳过不误报；
 - `test_llm_variants`：脚本化 LLM 的变体生成/解析/并入计划、mock 与故障静默降级；
 - `test_detector`：拒绝话术不误报、5xx 不计漏洞、存疑绝不自动上报；
+- `test_llm_agent`：脚本化 LLM 驱动完整 agent loop（攻击/判定/收尾）、无 LLM 优雅降级、
+  主 Agent 集成（判定并入/落库/报告）；
+- `test_llm_explorer`：http_probe 侦察回执、http_attack 原始攻击确定性判定
+  （命中 → `llm_explored` 漏洞；加固目标 → failed）、工具开关门控、主 Agent 合并落库；
+- `test_llm_fixplan`：LLM 修复建议写入 plan.ai_note/finding.fix 并呈现在修复报告、
+  关闭/无 LLM 时确定性降级；
+- `test_web`：面板新 API 全链路（网址任务步骤/增量日志/报告/修复、
+  上传 ZIP 静态扫描与 zip-slip 拒绝、非本地目标 403、404/400 语义）；
 - `test_regression`：修复→回归清零→复扫 0 命中→guards 逐项验证；
 - CI：GitHub Actions 双 Python 版本（3.10/3.11）全量测试 + 靶场验收 job（发现率/零误报/回归）。
 
@@ -162,7 +188,13 @@ domain 分区 = 目标类型×业务域；持久化 = SQLite JSON 快照。
   （tools + tool_choice=required），持续攻击至 finalize/100 次上限（可配置调大）/超时；
   注入参考攻击手法，实测单轮 100 次自主攻击 · 37 漏洞命中；判定走确定性管线；
   无 LLM 优雅降级为空操作）；
+- ~~LLM 主动侦察工具~~（已交付 V13：`engine.llm_explorer_tools` 开启后，LLM 攻击
+  Agent 额外获得 `http_probe`/`http_attack` 原始探测工具，跳出样本库自主探索
+  攻击面；判定仍由确定性信号管线把关，产出 `llm_explored` 漏洞并入主扫描）；
+- ~~LLM 修复建议~~（已交付 V13：`engine.llm_fix_plan` 开启后，蓝队规划逐条漏洞
+  生成 AI 修复建议，进修复报告「🤖 AI 修复建议」节；无 LLM 静默降级）；
+- ~~Web 面板 v2~~（已交付 V13：网址输入/源码上传 → 任务步骤时间线 + 实时日志
+  追踪 → 报告/一键修复，FastAPI + 单文件原生 JS 暗色仪表盘）；
 - 子Agent 升级为 dsh 完整 agent loop（LLM 驱动的侦察推理/攻击链编排）；
 - D5 业务逻辑/D6 数据/D8 供应链/D9 运行时检测面样本库（YAML 零改动接入）；
-- 静态扫描扩展（SAST 语义规则/多语言/IaC 模板）；
-- Web 面板（复用 dsh server FastAPI）。
+- 静态扫描扩展（SAST 语义规则/多语言/IaC 模板）。

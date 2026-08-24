@@ -3,209 +3,784 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>dsh-red-blue-team · 红蓝队安全检测面板</title>
+<title>dsh-red-blue-team · 红蓝队智能检测平台</title>
 <style>
-  :root { --bg:#0f1117; --panel:#161b26; --border:#2a3242; --fg:#e6e9ef;
-          --dim:#8b93a7; --accent:#00c2ff; --ok:#20e3b2; --bad:#ff6b6b;
-          --warn:#ffb86c; --purple:#a855f7; }
+  :root {
+    --bg:#0b0e15; --bg2:#0f131d; --panel:#141a28; --panel2:#1a2133;
+    --border:#232c40; --border2:#2e3a55;
+    --fg:#e8ecf4; --dim:#8b95ab; --faint:#5b6478;
+    --accent:#00c2ff; --accent2:#3d8bff;
+    --ok:#22d3a5; --bad:#ff6b6b; --warn:#ffb454; --purple:#a78bfa;
+    --critical:#ff4d6d; --high:#ff9f43; --medium:#ffd166; --low:#22d3a5;
+    --mono:Consolas,"Cascadia Mono","JetBrains Mono",Menlo,monospace;
+  }
   * { box-sizing:border-box; margin:0; padding:0; }
-  body { background:var(--bg); color:var(--fg); font-family:"Segoe UI",system-ui,sans-serif; padding:20px; }
-  h1 { font-size:22px; margin-bottom:4px; }
-  .sub { color:var(--dim); font-size:13px; margin-bottom:18px; }
-  .row { display:flex; gap:16px; flex-wrap:wrap; }
-  .col { flex:1 1 420px; min-width:340px; }
-  .card { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:14px; margin-bottom:16px; }
-  .card h2 { font-size:15px; margin-bottom:10px; color:var(--accent); }
-  button { background:var(--accent); color:#04121a; border:none; border-radius:6px;
-           padding:8px 16px; font-weight:600; cursor:pointer; font-size:13px; }
-  button.secondary { background:transparent; border:1px solid var(--border); color:var(--fg); }
-  button:disabled { opacity:.5; cursor:not-allowed; }
-  table { width:100%; border-collapse:collapse; font-size:13px; }
-  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--border); }
-  th { color:var(--dim); font-weight:500; }
-  .tag { display:inline-block; padding:2px 8px; border-radius:10px; font-size:12px; }
-  .critical { background:rgba(255,107,107,.15); color:var(--bad); }
-  .high { background:rgba(255,184,108,.15); color:var(--warn); }
-  .medium { background:rgba(255,219,128,.12); color:#ffdb80; }
-  .low { background:rgba(32,227,178,.12); color:var(--ok); }
-  .status-running { color:var(--accent); } .status-finished { color:var(--ok); }
-  .status-failed { color:var(--bad); } .status-queued { color:var(--dim); }
-  pre { background:#0b0e14; border:1px solid var(--border); border-radius:8px;
-        padding:12px; font-size:12px; overflow:auto; max-height:520px; white-space:pre-wrap; }
-  .msg { color:var(--dim); font-size:13px; margin-top:8px; }
+  html,body { height:100%; }
+  body {
+    background:
+      radial-gradient(1100px 480px at 78% -10%, rgba(0,194,255,.08), transparent 60%),
+      radial-gradient(900px 420px at 8% 110%, rgba(167,139,250,.07), transparent 60%),
+      var(--bg);
+    color:var(--fg);
+    font-family:"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    font-size:14px;
+  }
+  ::-webkit-scrollbar { width:9px; height:9px; }
+  ::-webkit-scrollbar-thumb { background:var(--border2); border-radius:5px; }
+  ::-webkit-scrollbar-track { background:transparent; }
+
+  /* ---------- 顶栏 ---------- */
+  header {
+    display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+    padding:14px 22px; border-bottom:1px solid var(--border);
+    background:rgba(11,14,21,.85); backdrop-filter:blur(8px);
+    position:sticky; top:0; z-index:50;
+  }
+  .brand { display:flex; align-items:center; gap:10px; }
+  .logo {
+    width:34px; height:34px; border-radius:9px;
+    background:linear-gradient(135deg, rgba(255,107,107,.9), rgba(0,194,255,.85));
+    display:flex; align-items:center; justify-content:center;
+    font-size:17px; font-weight:800; color:#fff;
+    box-shadow:0 4px 18px rgba(0,194,255,.35);
+  }
+  .brand h1 { font-size:17px; font-weight:700; letter-spacing:.3px; }
+  .brand .ver { color:var(--faint); font-size:11px; font-weight:400; }
+  .brand .sub { color:var(--dim); font-size:12px; }
+  .hdr-right { margin-left:auto; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .badge {
+    display:inline-flex; align-items:center; gap:6px; padding:4px 11px;
+    border-radius:999px; font-size:12px; border:1px solid var(--border2);
+    background:var(--panel); color:var(--dim);
+  }
+  .badge .dot { width:7px; height:7px; border-radius:50%; background:var(--faint); }
+  .badge.on .dot { background:var(--ok); box-shadow:0 0 8px var(--ok); }
+  .badge.on { color:var(--ok); border-color:rgba(34,211,165,.4); }
+
+  /* ---------- 布局 ---------- */
+  main { display:grid; grid-template-columns:380px minmax(0,1fr); gap:18px; padding:18px 22px; }
+  @media (max-width:1000px) { main { grid-template-columns:1fr; } }
+  .card {
+    background:var(--panel); border:1px solid var(--border);
+    border-radius:14px; padding:16px; margin-bottom:16px;
+    box-shadow:0 8px 30px rgba(0,0,0,.25);
+  }
+  .card > h2 {
+    font-size:13px; letter-spacing:.8px; color:var(--dim); font-weight:600;
+    text-transform:uppercase; margin-bottom:12px;
+    display:flex; align-items:center; gap:8px;
+  }
+  .card > h2::before { content:""; width:3px; height:14px; border-radius:2px;
+    background:linear-gradient(var(--accent),var(--purple)); }
+
+  /* ---------- 表单 ---------- */
+  label { display:block; font-size:12px; color:var(--dim); margin:10px 0 5px; }
+  input[type=text], input[type=url] {
+    width:100%; background:var(--bg2); border:1px solid var(--border2);
+    color:var(--fg); border-radius:8px; padding:9px 12px; font-size:13px;
+    outline:none; transition:border-color .15s, box-shadow .15s;
+  }
+  input[type=text]:focus, input[type=url]:focus {
+    border-color:var(--accent); box-shadow:0 0 0 3px rgba(0,194,255,.12);
+  }
+  .toggles { display:grid; grid-template-columns:1fr 1fr; gap:7px; margin-top:12px; }
+  .toggle {
+    display:flex; align-items:flex-start; gap:8px; padding:9px 10px;
+    background:var(--bg2); border:1px solid var(--border2); border-radius:9px;
+    cursor:pointer; transition:border-color .15s; user-select:none;
+  }
+  .toggle:hover { border-color:var(--accent); }
+  .toggle input { margin-top:2px; accent-color:var(--accent); }
+  .toggle .t-title { font-size:12px; font-weight:600; }
+  .toggle .t-desc { font-size:10.5px; color:var(--faint); line-height:1.4; margin-top:2px; }
+  .toggle.disabled { opacity:.45; cursor:not-allowed; }
+  .btn {
+    border:none; border-radius:9px; padding:10px 16px; font-size:13px;
+    font-weight:700; cursor:pointer; transition:transform .1s, box-shadow .15s, opacity .15s;
+    letter-spacing:.4px;
+  }
+  .btn:active { transform:translateY(1px); }
+  .btn:disabled { opacity:.5; cursor:not-allowed; transform:none; }
+  .btn-primary {
+    background:linear-gradient(135deg, var(--accent2), var(--accent));
+    color:#03121c; width:100%; margin-top:14px;
+    box-shadow:0 6px 20px rgba(0,194,255,.25);
+  }
+  .btn-primary:hover:not(:disabled) { box-shadow:0 8px 26px rgba(0,194,255,.4); }
+  .btn-ghost { background:transparent; border:1px solid var(--border2); color:var(--fg); }
+  .btn-ghost:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
+  .btn-danger { background:rgba(255,77,109,.15); color:var(--critical); border:1px solid rgba(255,77,109,.35); }
+  .btn-ok { background:rgba(34,211,165,.15); color:var(--ok); border:1px solid rgba(34,211,165,.4); }
+
+  /* ---------- 上传区 ---------- */
+  .dropzone {
+    border:1.5px dashed var(--border2); border-radius:11px; padding:20px 12px;
+    text-align:center; color:var(--dim); cursor:pointer; transition:all .15s;
+    background:var(--bg2);
+  }
+  .dropzone:hover, .dropzone.drag { border-color:var(--accent); color:var(--accent); background:rgba(0,194,255,.05); }
+  .dropzone .dz-icon { font-size:24px; }
+  .dropzone .dz-main { font-size:12.5px; margin-top:6px; }
+  .dropzone .dz-sub { font-size:11px; color:var(--faint); margin-top:3px; }
+  .upload-meta { font-size:11.5px; color:var(--ok); margin-top:8px; word-break:break-all; }
+
+  /* ---------- 任务列表 ---------- */
+  .task-item {
+    border:1px solid var(--border); border-radius:11px; padding:11px 13px;
+    margin-bottom:10px; cursor:pointer; background:var(--panel2);
+    transition:border-color .15s, transform .1s;
+  }
+  .task-item:hover { border-color:var(--accent); }
+  .task-item.selected { border-color:var(--accent); box-shadow:0 0 0 3px rgba(0,194,255,.12); }
+  .task-head { display:flex; align-items:center; gap:8px; }
+  .task-name { font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .task-status { margin-left:auto; flex-shrink:0; }
+  .task-target { color:var(--faint); font-size:11px; margin-top:4px; overflow:hidden;
+    text-overflow:ellipsis; white-space:nowrap; }
+  .task-bar { height:4px; background:var(--bg2); border-radius:3px; margin-top:9px; overflow:hidden; }
+  .task-bar > div { height:100%; border-radius:3px; background:linear-gradient(90deg,var(--accent2),var(--accent));
+    transition:width .4s; }
+  .task-meta { display:flex; gap:10px; align-items:center; margin-top:8px; font-size:11px; color:var(--dim); flex-wrap:wrap; }
+  .chip { padding:2px 8px; border-radius:8px; font-size:11px; background:var(--bg2); border:1px solid var(--border2); }
+  .chip.sev-c { color:var(--critical); border-color:rgba(255,77,109,.4); background:rgba(255,77,109,.08); }
+  .chip.sev-h { color:var(--high); border-color:rgba(255,159,67,.4); background:rgba(255,159,67,.08); }
+  .chip.sev-m { color:var(--medium); border-color:rgba(255,209,102,.4); background:rgba(255,209,102,.08); }
+  .chip.sev-l { color:var(--low); border-color:rgba(34,211,165,.4); background:rgba(34,211,165,.08); }
+  .chip.llm { color:var(--purple); border-color:rgba(167,139,250,.4); background:rgba(167,139,250,.08); }
+
+  /* ---------- 状态 ---------- */
+  .st { display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border-radius:999px; font-size:11px; font-weight:600; }
+  .st-queued { color:var(--dim); background:var(--bg2); border:1px solid var(--border2); }
+  .st-running { color:var(--accent); background:rgba(0,194,255,.08); border:1px solid rgba(0,194,255,.35); }
+  .st-finished { color:var(--ok); background:rgba(34,211,165,.08); border:1px solid rgba(34,211,165,.35); }
+  .st-failed { color:var(--bad); background:rgba(255,107,107,.08); border:1px solid rgba(255,107,107,.35); }
+  .st-running .pulse { width:6px; height:6px; border-radius:50%; background:var(--accent); animation:pulse 1.2s infinite; }
+  @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(0,194,255,.5)} 100%{box-shadow:0 0 0 6px rgba(0,194,255,0)} }
+
+  /* ---------- 详情：步骤 ---------- */
+  .steps { position:relative; padding-left:8px; }
+  .step { display:flex; gap:12px; padding:9px 4px; position:relative; }
+  .step:not(:last-child)::before {
+    content:""; position:absolute; left:14px; top:30px; bottom:-6px;
+    width:2px; background:var(--border2);
+  }
+  .step .node {
+    width:22px; height:22px; border-radius:50%; flex-shrink:0;
+    display:flex; align-items:center; justify-content:center; font-size:11px;
+    background:var(--bg2); border:2px solid var(--border2); z-index:1;
+  }
+  .step.s-running .node { border-color:var(--accent); color:var(--accent); animation:pulse2 1.2s infinite; }
+  @keyframes pulse2 { 0%{box-shadow:0 0 0 0 rgba(0,194,255,.45)} 100%{box-shadow:0 0 0 7px rgba(0,194,255,0)} }
+  .step.s-finished .node { border-color:var(--ok); background:var(--ok); color:#06231b; }
+  .step.s-failed .node { border-color:var(--bad); background:var(--bad); color:#2b0a0a; }
+  .step.s-skipped .node { border-color:var(--faint); color:var(--faint); }
+  .step .s-body { flex:1; min-width:0; }
+  .step .s-name { font-size:13px; font-weight:600; }
+  .step .s-msg { font-size:11.5px; color:var(--dim); margin-top:2px; word-break:break-word; }
+  .step .s-time { font-size:10.5px; color:var(--faint); margin-top:2px; font-family:var(--mono); }
+
+  /* ---------- 日志控制台 ---------- */
+  .console {
+    background:#070a11; border:1px solid var(--border); border-radius:10px;
+    font-family:var(--mono); font-size:11.5px; height:260px; overflow-y:auto;
+    padding:10px 12px; line-height:1.65;
+  }
+  .console .line { display:flex; gap:8px; }
+  .console .ts { color:var(--faint); flex-shrink:0; }
+  .console .lv { flex-shrink:0; width:34px; text-align:right; }
+  .console .info .lv { color:var(--accent); }
+  .console .warn .lv { color:var(--warn); }
+  .console .error .lv { color:var(--bad); }
+  .console .msg { color:var(--fg); white-space:pre-wrap; word-break:break-all; flex:1; }
+  .console .empty { color:var(--faint); }
+  .console-bar { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+  .console-bar .live { display:inline-flex; align-items:center; gap:5px; font-size:11px; color:var(--ok); }
+  .console-bar .live .pulse { width:6px; height:6px; border-radius:50%; background:var(--ok); animation:pulse 1.2s infinite; }
+
+  /* ---------- 漏洞表格 ---------- */
+  .sev { display:inline-block; padding:2px 9px; border-radius:7px; font-size:11px; font-weight:700; text-transform:uppercase; }
+  .sev-critical { background:rgba(255,77,109,.14); color:var(--critical); }
+  .sev-high { background:rgba(255,159,67,.14); color:var(--high); }
+  .sev-medium { background:rgba(255,209,102,.14); color:var(--medium); }
+  .sev-low { background:rgba(34,211,165,.14); color:var(--low); }
+  table.finds { width:100%; border-collapse:collapse; font-size:12px; }
+  table.finds th { text-align:left; color:var(--dim); font-weight:600; padding:6px 8px;
+    border-bottom:1px solid var(--border2); position:sticky; top:0; background:var(--panel); }
+  table.finds td { padding:7px 8px; border-bottom:1px solid var(--border); vertical-align:top; }
+  table.finds tr:hover td { background:rgba(255,255,255,.02); }
+  .cat { color:var(--purple); font-weight:600; }
+  .evidence { color:var(--dim); font-size:11.5px; max-width:340px; overflow:hidden;
+    text-overflow:ellipsis; white-space:nowrap; }
+  .evidence.open { white-space:normal; word-break:break-all; }
+  .evidence-toggle { color:var(--accent); cursor:pointer; font-size:11px; margin-left:6px; flex-shrink:0; }
+  .scroll-y { max-height:420px; overflow-y:auto; }
+
+  /* ---------- 报告 ---------- */
+  .report { background:#0a0d15; border:1px solid var(--border); border-radius:10px;
+    padding:16px 18px; font-size:13px; line-height:1.7; overflow:auto; max-height:640px; }
+  .report h1,.report h2,.report h3,.report h4 { margin:14px 0 8px; color:var(--fg); }
+  .report h1 { font-size:18px; border-bottom:1px solid var(--border2); padding-bottom:8px; }
+  .report h2 { font-size:15px; color:var(--accent); }
+  .report h3 { font-size:13.5px; color:var(--purple); }
+  .report p { margin:6px 0; }
+  .report code { background:var(--panel2); border:1px solid var(--border); border-radius:4px;
+    padding:1px 5px; font-family:var(--mono); font-size:11.5px; color:var(--warn); }
+  .report pre { background:var(--panel2); border:1px solid var(--border); border-radius:8px;
+    padding:10px 12px; overflow:auto; margin:8px 0; }
+  .report pre code { background:none; border:none; padding:0; color:var(--fg); }
+  .report blockquote { border-left:3px solid var(--accent); padding:2px 12px; color:var(--dim);
+    margin:8px 0; background:rgba(0,194,255,.04); border-radius:0 6px 6px 0; }
+  .report table { border-collapse:collapse; margin:8px 0; font-size:12px; }
+  .report th,.report td { border:1px solid var(--border2); padding:5px 10px; }
+  .report th { background:var(--panel2); }
+  .report ul,.report ol { padding-left:22px; margin:6px 0; }
+  .report hr { border:none; border-top:1px solid var(--border); margin:14px 0; }
+  .report a { color:var(--accent); }
+
+  /* ---------- 通用 ---------- */
+  .empty-hint { color:var(--faint); text-align:center; padding:26px 10px; font-size:12.5px; }
+  .toast-wrap { position:fixed; right:18px; bottom:18px; display:flex; flex-direction:column; gap:8px; z-index:99; }
+  .toast { background:var(--panel2); border:1px solid var(--border2); border-left:3px solid var(--accent);
+    padding:10px 14px; border-radius:8px; font-size:12.5px; max-width:340px;
+    animation:slidein .2s ease; box-shadow:0 8px 26px rgba(0,0,0,.4); }
+  .toast.err { border-left-color:var(--bad); }
+  .toast.ok { border-left-color:var(--ok); }
+  @keyframes slidein { from { transform:translateX(24px); opacity:0; } }
+  .detail-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+  .detail-head h2 { font-size:15px; margin-right:auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .tabs { display:flex; gap:6px; margin-bottom:14px; border-bottom:1px solid var(--border); }
+  .tab { padding:8px 14px; font-size:12.5px; color:var(--dim); cursor:pointer;
+    border-bottom:2px solid transparent; margin-bottom:-1px; font-weight:600; }
+  .tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+  .tab:hover { color:var(--fg); }
+  .kv { font-size:12px; color:var(--dim); }
+  .kv b { color:var(--fg); font-weight:600; }
+  .row2 { display:flex; gap:8px; flex-wrap:wrap; }
 </style>
 </head>
 <body>
-  <h1>🔴🔵 dsh-red-blue-team <span style="color:var(--purple)">控制面板</span></h1>
-  <div class="sub" id="configLine">加载配置中…</div>
 
-  <div class="row">
-    <div class="col">
-      <div class="card">
-        <h2>扫描任务</h2>
-        <div style="display:flex;gap:8px;margin-bottom:10px;">
-          <button id="btnScan" onclick="startScan()">▶ 发起红队扫描</button>
-          <button class="secondary" onclick="refreshAll()">↻ 刷新</button>
-        </div>
-        <table id="taskTable">
-          <thead><tr><th>任务</th><th>目标</th><th>状态</th><th>样本</th><th>命中</th><th>漏洞</th><th></th></tr></thead>
-          <tbody><tr><td colspan="7" class="msg">暂无任务</td></tr></tbody>
-        </table>
-        <div class="msg" id="scanMsg"></div>
-      </div>
-
-      <div class="card">
-        <h2>漏洞清单</h2>
-        <table id="findingTable">
-          <thead><tr><th>#</th><th>类别</th><th>级别</th><th>角色</th><th>修复建议</th></tr></thead>
-          <tbody><tr><td colspan="5" class="msg">发起扫描后此处显示漏洞</td></tr></tbody>
-        </table>
-      </div>
-    </div>
-
-    <div class="col">
-      <div class="card">
-        <h2>攻击报告</h2>
-        <div style="display:flex;gap:8px;margin-bottom:10px;">
-          <button class="secondary" id="btnReport" onclick="loadReport()" disabled>查看报告</button>
-          <button class="secondary" id="btnFix" onclick="runFix()" disabled>🛠 蓝队修复+回归</button>
-        </div>
-        <pre id="reportView">选择任务后查看攻击报告</pre>
-        <div class="msg" id="reportMsg"></div>
-      </div>
-
-      <div class="card">
-        <h2>完整修复报告</h2>
-        <pre id="remediationView" style="max-height:360px;">修复后生成（问题说明+代码级方案+验证步骤）</pre>
-      </div>
+<header>
+  <div class="brand">
+    <div class="logo">⚔</div>
+    <div>
+      <h1>dsh-red-blue-team <span class="ver">智能红蓝对抗检测平台</span></h1>
+      <div class="sub">红队自动攻击 · 蓝队自动修复 · 全程可追踪</div>
     </div>
   </div>
+  <div class="hdr-right">
+    <span class="badge" id="llmBadge"><span class="dot"></span>LLM 检测中…</span>
+    <span class="badge" id="targetBadge">目标: —</span>
+  </div>
+</header>
+
+<main>
+  <!-- ============ 左列：控制与任务 ============ -->
+  <section class="left">
+
+    <div class="card">
+      <h2>新建检测 · 网址目标</h2>
+      <label>目标名称</label>
+      <input type="text" id="urlName" placeholder="例如：电商业务系统（生产）" value="Web 目标">
+      <label>目标网址</label>
+      <input type="url" id="urlInput" placeholder="http://127.0.0.1:8000 或 https://example.com">
+      <div class="toggles">
+        <label class="toggle" id="tgAgent">
+          <input type="checkbox" id="optAgent" checked>
+          <span><div class="t-title">🤖 LLM 自主攻击</div>
+          <div class="t-desc">LLM 多轮自主决策，突破样本库限制寻找漏洞</div></span>
+        </label>
+        <label class="toggle" id="tgExplorer">
+          <input type="checkbox" id="optExplorer" checked>
+          <span><div class="t-title">🔎 LLM 主动侦察</div>
+          <div class="t-desc">开放 http_probe / http_attack 原始探测工具</div></span>
+        </label>
+        <label class="toggle" id="tgFixPlan">
+          <input type="checkbox" id="optFixPlan" checked>
+          <span><div class="t-title">🧠 LLM 修复建议</div>
+          <div class="t-desc">蓝队修复方案由 LLM 逐条生成补充建议</div></span>
+        </label>
+        <label class="toggle" id="tgBlueFix">
+          <input type="checkbox" id="optBlueFix">
+          <span><div class="t-title">🛡 蓝队自动修复</div>
+          <div class="t-desc">沙箱内自动修复并回归验证（靶场目标）</div></span>
+        </label>
+      </div>
+      <button class="btn btn-primary" id="btnStart">▶ 开始红队检测</button>
+    </div>
+
+    <div class="card">
+      <h2>新建检测 · 上传系统源码</h2>
+      <div class="dropzone" id="dropzone">
+        <div class="dz-icon">📦</div>
+        <div class="dz-main">点击选择 或 拖拽 ZIP 压缩包到此</div>
+        <div class="dz-sub">支持上传整个业务系统项目（≤50MB），静态扫描代码漏洞并给出修复方案</div>
+      </div>
+      <input type="file" id="fileInput" accept=".zip" style="display:none">
+      <div class="upload-meta" id="uploadMeta"></div>
+      <label>项目名称</label>
+      <input type="text" id="projName" placeholder="例如：订单服务 v2.3" value="上传项目">
+      <button class="btn btn-primary" id="btnUpload" disabled style="margin-top:14px">📤 上传并静态扫描</button>
+    </div>
+
+    <div class="card">
+      <h2>任务列表 <span style="color:var(--faint);font-weight:400;text-transform:none" id="taskCount"></span></h2>
+      <div id="taskList"><div class="empty-hint">暂无任务，先在上方发起一次检测</div></div>
+    </div>
+  </section>
+
+  <!-- ============ 右列：任务详情 ============ -->
+  <section class="right">
+    <div class="card" id="detailCard">
+      <div class="empty-hint" id="noDetail">👈 从左侧任务列表选择一个任务，查看每一步的进度与日志</div>
+      <div id="detailBody" style="display:none">
+        <div class="detail-head">
+          <h2 id="dName">—</h2>
+          <span id="dStatus"></span>
+          <button class="btn btn-ghost" id="btnReport">📄 攻击报告</button>
+          <button class="btn btn-ghost" id="btnRemediation">🛠 修复报告</button>
+          <button class="btn btn-ok" id="btnFix" style="display:none">🛡 蓝队修复</button>
+        </div>
+        <div class="kv" id="dMeta" style="margin-bottom:12px"></div>
+        <div class="tabs">
+          <div class="tab active" data-tab="steps">📋 进程步骤</div>
+          <div class="tab" data-tab="logs">📜 实时日志 <span id="logCountBadge"></span></div>
+          <div class="tab" data-tab="findings">🎯 漏洞发现 <span id="findCountBadge"></span></div>
+          <div class="tab" data-tab="report">📄 报告</div>
+        </div>
+        <div id="tabSteps"></div>
+        <div id="tabLogs" style="display:none"></div>
+        <div id="tabFindings" style="display:none"></div>
+        <div id="tabReport" style="display:none"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="toast-wrap" id="toasts"></div>
 
 <script>
-let currentTask = null;
-const sevTag = s => `<span class="tag ${s}">${s}</span>`;
-const statusTag = s => `<span class="status-${s}">${s}</span>`;
+"use strict";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
+  (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
-async function api(path, opts) {
+const state = {
+  tasks: [],           // 任务列表快照
+  selected: null,      // 当前选中 task_id
+  logCount: 0,         // 已拉取的日志条数
+  tab: "steps",
+  reportLoaded: null,  // 缓存 {key, html}
+  llmAvailable: false,
+  pollTimer: null,
+};
+
+/* ---------- 基础请求 ---------- */
+async function api(path, opts = {}) {
   const resp = await fetch(path, opts);
-  if (!resp.ok) throw new Error((await resp.text()).slice(0, 200));
-  return resp.json();
-}
-
-async function refreshAll() {
-  try {
-    const cfg = await api("/api/config");
-    document.getElementById("configLine").textContent =
-      `目标: ${cfg.target} ｜ 类型: ${cfg.type} ｜ 场景: ${cfg.scenario} ｜ 角色: ${cfg.roles.join(", ")}`;
-    const data = await api("/api/scans");
-    const tbody = document.querySelector("#taskTable tbody");
-    if (!data.tasks.length) {
-      tbody.innerHTML = `<tr><td colspan="7" class="msg">暂无任务</td></tr>`;
-      return;
-    }
-    tbody.innerHTML = data.tasks.map(t => `
-      <tr>
-        <td>${t.task_id}</td><td>${t.target || "-"}</td>
-        <td>${statusTag(t.status)}</td>
-        <td>${t.total ?? "-"}</td><td>${t.success ?? "-"}</td>
-        <td>${t.findings ?? "-"}</td>
-        <td><button class="secondary" onclick="selectTask('${t.task_id}')">查看</button></td>
-      </tr>`).join("");
-  } catch (e) {
-    document.getElementById("scanMsg").textContent = "刷新失败: " + e.message;
+  if (!resp.ok) {
+    let detail = resp.statusText;
+    try { const j = await resp.json(); detail = j.detail || detail; } catch {}
+    throw new Error(detail);
   }
+  const ct = resp.headers.get("content-type") || "";
+  return ct.includes("json") ? resp.json() : resp.text();
 }
 
-async function startScan() {
-  const btn = document.getElementById("btnScan");
-  btn.disabled = true;
-  document.getElementById("scanMsg").textContent = "任务已提交，扫描中…";
+function toast(msg, kind = "") {
+  const el = document.createElement("div");
+  el.className = "toast " + kind;
+  el.textContent = msg;
+  $("toasts").appendChild(el);
+  setTimeout(() => { el.style.opacity = "0"; el.style.transition = "opacity .3s";
+    setTimeout(() => el.remove(), 320); }, 3600);
+}
+
+/* ---------- 任务创建 ---------- */
+async function startUrlTask() {
+  const url = $("urlInput").value.trim();
+  const name = $("urlName").value.trim() || "Web 目标";
+  if (!url) return toast("请输入目标网址", "err");
+  if (!/^https?:\/\//.test(url)) return toast("网址需以 http:// 或 https:// 开头", "err");
+  const payload = {
+    name,
+    url,
+    llm_agent: $("optAgent").checked,
+    llm_explorer: $("optExplorer").checked,
+    llm_fix_plan: $("optFixPlan").checked,
+    blue_fix: $("optBlueFix").checked,
+  };
+  $("btnStart").disabled = true;
   try {
-    const resp = await api("/api/scans", { method: "POST" });
-    currentTask = resp.task_id;
-    pollTask();
-  } catch (e) {
-    document.getElementById("scanMsg").textContent = "发起失败: " + e.message;
-    btn.disabled = false;
-  }
+    const r = await api("/api/tasks", { method: "POST",
+      headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload) });
+    toast(`任务已创建：${r.task_id}`, "ok");
+    selectTask(r.task_id);
+    refreshTasks();
+  } catch (e) { toast("创建失败：" + e.message, "err"); }
+  finally { $("btnStart").disabled = false; }
 }
 
-async function pollTask() {
-  const id = currentTask;
+/* ---------- 上传 ---------- */
+let pendingFile = null;
+const dz = $("dropzone");
+dz.addEventListener("click", () => $("fileInput").click());
+dz.addEventListener("dragover", (e) => { e.preventDefault(); dz.classList.add("drag"); });
+dz.addEventListener("dragleave", () => dz.classList.remove("drag"));
+dz.addEventListener("drop", (e) => {
+  e.preventDefault(); dz.classList.remove("drag");
+  if (e.dataTransfer.files.length) setFile(e.dataTransfer.files[0]);
+});
+$("fileInput").addEventListener("change", (e) => {
+  if (e.target.files.length) setFile(e.target.files[0]);
+});
+function setFile(f) {
+  if (!f.name.toLowerCase().endsWith(".zip")) return toast("仅支持 ZIP 压缩包", "err");
+  if (f.size > 50 * 1024 * 1024) return toast("文件超过 50MB 上限", "err");
+  pendingFile = f;
+  $("uploadMeta").textContent = `已选择：${f.name}（${(f.size/1024/1024).toFixed(2)} MB）`;
+  $("btnUpload").disabled = false;
+}
+async function uploadProject() {
+  if (!pendingFile) return toast("请先选择 ZIP 文件", "err");
+  const name = $("projName").value.trim() || "上传项目";
+  $("btnUpload").disabled = true;
   try {
-    const data = await api(`/api/scans/${id}`);
-    await refreshAll();
-    const task = data.task;
-    if (task.status === "running" || task.status === "queued") {
-      setTimeout(pollTask, 1500);
-    } else if (task.status === "finished") {
-      document.getElementById("scanMsg").textContent =
-        `✅ 扫描完成：${data.result.success} 次攻击成功，${data.result.findings.length} 条漏洞`;
-      renderFindings(data.result.findings);
-      document.getElementById("btnReport").disabled = false;
-      document.getElementById("btnFix").disabled = false;
-      document.getElementById("btnScan").disabled = false;
-    } else {
-      document.getElementById("scanMsg").textContent = "❌ 扫描失败: " + (task.error || "");
-      document.getElementById("btnScan").disabled = false;
-    }
-  } catch (e) {
-    document.getElementById("scanMsg").textContent = "轮询失败: " + e.message;
-    document.getElementById("btnScan").disabled = false;
-  }
+    const r = await api(`/api/tasks/upload?name=${encodeURIComponent(name)}`, {
+      method: "POST", body: pendingFile });
+    toast(`上传解析完成，任务已创建：${r.task_id}`, "ok");
+    pendingFile = null; $("uploadMeta").textContent = ""; $("btnUpload").disabled = true;
+    selectTask(r.task_id);
+    refreshTasks();
+  } catch (e) { toast("上传失败：" + e.message, "err"); $("btnUpload").disabled = false; }
 }
 
-function renderFindings(findings) {
-  const tbody = document.querySelector("#findingTable tbody");
-  if (!findings.length) {
-    tbody.innerHTML = `<tr><td colspan="5" class="msg">未发现漏洞 ✅</td></tr>`;
+/* ---------- 任务列表 ---------- */
+const STATUS_META = {
+  queued:  { cls: "st-queued",  label: "排队中" },
+  running: { cls: "st-running", label: "执行中" },
+  finished:{ cls: "st-finished",label: "已完成" },
+  failed:  { cls: "st-failed",  label: "失败" },
+};
+const SEV_META = { critical: "sev-c", high: "sev-h", medium: "sev-m", low: "sev-l" };
+
+function taskStatusHtml(task) {
+  const m = STATUS_META[task.status] || STATUS_META.queued;
+  const pulse = task.status === "running" ? '<span class="pulse"></span>' : "";
+  return `<span class="st ${m.cls}">${pulse}${m.label}</span>`;
+}
+function taskChips(task) {
+  const sc = task.severity_counts || {};
+  const chips = [];
+  if (task.llm_agent) chips.push('<span class="chip llm">LLM</span>');
+  if (sc.critical) chips.push(`<span class="chip sev-c">严重 ${sc.critical}</span>`);
+  if (sc.high) chips.push(`<span class="chip sev-h">高危 ${sc.high}</span>`);
+  if (sc.medium) chips.push(`<span class="chip sev-m">中危 ${sc.medium}</span>`);
+  if (sc.low) chips.push(`<span class="chip sev-l">低危 ${sc.low}</span>`);
+  return chips.join("");
+}
+function renderTaskList(tasks) {
+  state.tasks = tasks;
+  const anyRunning = tasks.some((t) => t.status === "running" || t.status === "queued");
+  $("taskCount").textContent = tasks.length ? `（${tasks.length}）` : "";
+  const box = $("taskList");
+  if (!tasks.length) {
+    box.innerHTML = '<div class="empty-hint">暂无任务，先在上方发起一次检测</div>';
     return;
   }
-  tbody.innerHTML = findings.map((f, i) => `
-    <tr>
-      <td>${f.finding_id}</td><td>${f.category}</td>
-      <td>${sevTag(f.severity)}</td><td>${f.role}</td>
-      <td title="${f.evidence}">${f.fix_plan || "-"}</td>
-    </tr>`).join("");
+  const done = (t) => t.step_total ? Math.round(t.step_done / t.step_total * 100) : 0;
+  box.innerHTML = tasks.map((t) => `
+    <div class="task-item ${t.task_id === state.selected ? "selected" : ""}" data-id="${t.task_id}">
+      <div class="task-head">
+        <span class="task-name">${esc(t.name)}</span>
+        <span class="task-status">${taskStatusHtml(t)}</span>
+      </div>
+      <div class="task-target">🎯 ${esc(t.target || "—")}</div>
+      <div class="task-bar"><div style="width:${done(t)}%"></div></div>
+      <div class="task-meta">
+        <span>步骤 ${t.step_done || 0}/${t.step_total || 0}</span>
+        ${t.current_step ? `<span>⏳ ${esc(t.current_step)}</span>` : ""}
+        ${t.findings != null ? `<span>🎯 漏洞 ${t.findings}</span>` : ""}
+        ${taskChips(t)}
+        ${t.error ? `<span style="color:var(--bad)">⚠ ${esc(t.error)}</span>` : ""}
+      </div>
+    </div>`).join("");
+  box.querySelectorAll(".task-item").forEach((el) =>
+    el.addEventListener("click", () => selectTask(el.dataset.id)));
 }
 
-async function selectTask(id) {
-  currentTask = id;
-  document.getElementById("btnReport").disabled = false;
-  document.getElementById("btnFix").disabled = false;
-  await loadReport();
+/* ---------- 详情 ---------- */
+function selectTask(id) {
+  state.selected = id;
+  state.logCount = 0;
+  state.reportLoaded = null;
+  document.querySelectorAll(".task-item").forEach((el) =>
+    el.classList.toggle("selected", el.dataset.id === id));
+  loadDetail();
+}
+
+async function loadDetail() {
+  if (!state.selected) return;
+  try {
+    const d = await api(`/api/tasks/${state.selected}?after=${state.logCount}`);
+    renderDetail(d);
+  } catch (e) { /* 任务可能刚创建，稍后重试 */ }
+}
+
+function fmtTime(ts) {
+  if (!ts) return "—";
+  const d = new Date(ts * 1000);
+  return d.toLocaleString("zh-CN", { hour12: false });
+}
+function fmtDur(a, b) {
+  if (!a || !b) return "";
+  const s = Math.max(0, (b - a) / 1000);
+  return s >= 60 ? `${(s/60).toFixed(1)} 分钟` : `${s.toFixed(1)} 秒`;
+}
+function fmtLogTime(ts) { return ts || ""; }
+
+function renderDetail(d) {
+  const task = d.task, steps = d.steps || [], logs = d.logs || [], result = d.result;
+  $("noDetail").style.display = "none";
+  $("detailBody").style.display = "block";
+  $("dName").textContent = task.name;
+  $("dStatus").innerHTML = taskStatusHtml(task);
+  const targetLine = task.target ? `目标：<b>${esc(task.target)}</b>　` : "";
+  const scanLine = task.scan_id ? `扫描编号：<b>${esc(task.scan_id)}</b>　` : "";
+  const timeLine = task.started_at
+    ? `开始：<b>${fmtTime(task.started_at)}</b>　耗时：<b>${fmtDur(task.started_at * 1000, (task.finished_at || Date.now()/1000) * 1000)}</b>`
+    : `创建：<b>${fmtTime(task.created_at)}</b>`;
+  $("dMeta").innerHTML = `${targetLine}${scanLine}${timeLine}`;
+
+  /* 修复按钮：URL 任务（可自动修复）完成后显示 */
+  const finished = task.status === "finished";
+  $("btnFix").style.display = (finished && task.target && /^https?:/.test(task.target)) ? "" : "none";
+
+  /* 步骤时间线 */
+  $("tabSteps").innerHTML = steps.length ? steps.map((s) => {
+    const cls = "s-" + s.status;
+    const icon = s.status === "finished" ? "✓" : s.status === "failed" ? "✕"
+      : s.status === "skipped" ? "·" : "…";
+    const dur = s.finished_at && s.started_at
+      ? `　⏱ ${fmtDur(s.started_at * 1000, s.finished_at * 1000)}` : "";
+    return `<div class="step ${cls}">
+      <div class="node">${icon}</div>
+      <div class="s-body">
+        <div class="s-name">${esc(s.name)}</div>
+        ${s.message ? `<div class="s-msg">${esc(s.message)}</div>` : ""}
+        <div class="s-time">${fmtTime(s.started_at)}${dur}</div>
+      </div>
+    </div>`;
+  }).join("") : '<div class="empty-hint">等待任务开始…</div>';
+
+  /* 日志 */
+  if (logs.length) {
+    state.logCount += logs.length;
+    const box = $("tabLogs");
+    box.innerHTML = `
+      <div class="console-bar">
+        <span class="live">${task.status === "running" ? '<span class="pulse"></span>LIVE' : "已结束"}</span>
+        <span style="color:var(--faint);font-size:11px">共 ${state.logCount} 条日志</span>
+        <label style="margin:0 0 0 auto;display:flex;align-items:center;gap:5px;font-size:11px;color:var(--dim);cursor:pointer">
+          <input type="checkbox" id="autoScroll" checked> 自动滚动</label>
+      </div>
+      <div class="console" id="console"></div>`;
+    appendLogs(logs);
+  }
+  $("logCountBadge").textContent = task.status === "running" ? "●" : "";
+
+  /* 漏洞 */
+  const findings = result?.findings || [];
+  $("findCountBadge").textContent = findings.length ? `(${findings.length})` : "";
+  $("tabFindings").innerHTML = findings.length ? `
+    <div class="scroll-y"><table class="finds">
+      <thead><tr><th>#</th><th>漏洞类别</th><th>级别</th><th>角色</th><th>证据</th><th>修复方案</th></tr></thead>
+      <tbody>${findings.map((f, i) => `
+        <tr>
+          <td style="color:var(--faint)">${i + 1}</td>
+          <td><span class="cat">${esc(f.category)}</span></td>
+          <td><span class="sev sev-${esc(f.severity)}">${esc(f.severity)}</span></td>
+          <td>${esc(f.role)}</td>
+          <td><span class="evidence" data-i="${i}" title="点击展开/收起">${esc(f.evidence || "—")}</span>
+              <span class="evidence-toggle" data-i="${i}">展开</span></td>
+          <td>${esc(f.fix_plan || "人工研判")}</td>
+        </tr>`).join("")}</tbody>
+    </table></div>` : '<div class="empty-hint">暂无确认漏洞</div>';
+  $("tabFindings").querySelectorAll(".evidence-toggle").forEach((el) =>
+    el.addEventListener("click", () => {
+      const span = $("tabFindings").querySelector(`.evidence[data-i="${el.dataset.i}"]`);
+      span.classList.toggle("open");
+      el.textContent = span.classList.contains("open") ? "收起" : "展开";
+    }));
+
+  if (state.tab === "logs" && $("autoScroll")) {
+    const c = $("console");
+    if (c && $("autoScroll").checked) c.scrollTop = c.scrollHeight;
+  }
+}
+function appendLogs(logs) {
+  const c = $("console");
+  if (!c) return;
+  const frag = document.createDocumentFragment();
+  for (const row of logs) {
+    const div = document.createElement("div");
+    div.className = "line " + (row.level || "info");
+    div.innerHTML = `<span class="ts">${esc(fmtLogTime(row.ts))}</span>` +
+      `<span class="lv">${esc(row.level || "info").toUpperCase()}</span>` +
+      `<span class="msg">${esc(row.msg)}</span>`;
+    frag.appendChild(div);
+  }
+  c.appendChild(frag);
+  if ($("autoScroll")?.checked) c.scrollTop = c.scrollHeight;
+}
+
+/* ---------- 报告 ---------- */
+function mdToHtml(md) {
+  let s = esc(md);
+  // 代码块
+  s = s.replace(/```(\w*)\n([\s\S]*?)```/g,
+    (_, lang, code) => `<pre><code>${code}</code></pre>`);
+  // 表格
+  s = s.replace(/((?:^\|.*\|\s*$\n?)+)/gm, (block) => {
+    const rows = block.trim().split("\n").filter((r) => r.includes("|"));
+    if (rows.length < 2) return block;
+    const cells = (r) => r.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+    if (/^\|?[\s:|-]+\|?$/.test(rows[1])) {
+      const head = cells(rows[0]).map((c) => `<th>${c}</th>`).join("");
+      const body = rows.slice(2).map((r) =>
+        `<tr>${cells(r).map((c) => `<td>${c}</td>`).join("")}</tr>`).join("");
+      return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+    }
+    return block;
+  });
+  // 标题 / 引用 / 列表 / 行内
+  s = s.replace(/^####\s+(.+)$/gm, "<h4>$1</h4>")
+       .replace(/^###\s+(.+)$/gm, "<h3>$1</h3>")
+       .replace(/^##\s+(.+)$/gm, "<h2>$1</h2>")
+       .replace(/^#\s+(.+)$/gm, "<h1>$1</h1>")
+       .replace(/^&gt;\s?(.+)$/gm, "<blockquote>$1</blockquote>")
+       .replace(/^[-*]\s+(.+)$/gm, "<ul><li>$1</li></ul>")
+       .replace(/^\d+\.\s+(.+)$/gm, "<ol><li>$1</li></ol>")
+       .replace(/<\/ul>\n<ul>/g, "").replace(/<\/ol>\n<ol>/g, "")
+       .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+       .replace(/`([^`]+)`/g, "<code>$1</code>")
+       .replace(/\n{2,}/g, "\n");
+  s = s.split("\n").map((line) =>
+    /^<(h\d|table|blockquote|ul|ol|pre|hr)/.test(line) ? line : `<p>${line}</p>`).join("");
+  return s;
 }
 
 async function loadReport() {
-  if (!currentTask) return;
+  const task = state.tasks.find((t) => t.task_id === state.selected);
+  if (!task || task.status !== "finished") return toast("任务尚未完成", "err");
+  switchTab("report");
+  const key = "report:" + task.task_id;
+  if (state.reportLoaded?.key === key) return;
   try {
-    const resp = await fetch(`/api/scans/${currentTask}/report`);
-    if (!resp.ok) throw new Error(await resp.text());
-    document.getElementById("reportView").textContent = await resp.text();
-  } catch (e) {
-    document.getElementById("reportMsg").textContent = "报告加载失败: " + e.message;
-  }
+    const md = await api(`/api/tasks/${task.task_id}/report`);
+    $("tabReport").innerHTML = `<div class="report">${mdToHtml(md)}</div>`;
+    state.reportLoaded = { key, html: $("tabReport").innerHTML };
+  } catch (e) { $("tabReport").innerHTML =
+    `<div class="empty-hint">${esc(e.message)}</div>`; }
 }
 
-async function runFix() {
-  if (!currentTask) return;
-  document.getElementById("btnFix").disabled = true;
-  document.getElementById("reportMsg").textContent = "蓝队修复中（方案→沙箱应用→回归验证）…";
+async function loadRemediation() {
+  const task = state.tasks.find((t) => t.task_id === state.selected);
+  if (!task) return;
+  switchTab("report");
+  const key = "rem:" + task.task_id;
+  if (state.reportLoaded?.key === key) return;
   try {
-    await api(`/api/scans/${currentTask}/fix`, { method: "POST" });
-    const resp = await fetch(`/api/scans/${currentTask}/remediation`);
-    if (resp.ok) {
-      document.getElementById("remediationView").textContent = await resp.text();
-      document.getElementById("reportMsg").textContent = "✅ 修复报告已生成";
+    const md = await api(`/api/tasks/${task.task_id}/remediation`);
+    $("tabReport").innerHTML = `<div class="report">${mdToHtml(md)}</div>`;
+    state.reportLoaded = { key, html: $("tabReport").innerHTML };
+  } catch (e) { $("tabReport").innerHTML =
+    `<div class="empty-hint">${esc(e.message)}<br><br>
+    <button class="btn btn-ghost" onclick="fixNow()">🛡 现在执行蓝队修复</button></div>`; }
+}
+
+async function fixNow() {
+  const task = state.tasks.find((t) => t.task_id === state.selected);
+  if (!task) return;
+  $("btnFix").disabled = true;
+  try {
+    const r = await api(`/api/tasks/${task.task_id}/fix`, { method: "POST" });
+    toast("蓝队修复完成：" + JSON.stringify(r.fix_summary), "ok");
+    state.reportLoaded = null;
+    loadRemediation();
+  } catch (e) { toast("修复失败：" + e.message, "err"); }
+  finally { $("btnFix").disabled = false; }
+}
+
+/* ---------- Tab ---------- */
+function switchTab(name) {
+  state.tab = name;
+  document.querySelectorAll(".tab").forEach((el) =>
+    el.classList.toggle("active", el.dataset.tab === name));
+  const map = { steps: "tabSteps", logs: "tabLogs", findings: "tabFindings", report: "tabReport" };
+  for (const [k, v] of Object.entries(map)) $(v).style.display = k === name ? "" : "none";
+}
+document.querySelectorAll(".tab").forEach((el) =>
+  el.addEventListener("click", () => switchTab(el.dataset.tab)));
+
+/* ---------- 轮询 ---------- */
+async function refreshTasks() {
+  try {
+    const d = await api("/api/tasks");
+    renderTaskList(d.tasks || []);
+    return d.tasks || [];
+  } catch { return []; }
+}
+
+async function tick() {
+  const tasks = await refreshTasks();
+  const sel = tasks.find((t) => t.task_id === state.selected);
+  const anyRunning = tasks.some((t) => t.status === "running" || t.status === "queued");
+  if (sel) {
+    await loadDetail();
+    if (sel.status === "finished") {
+      const current = state.tasks.find((t) => t.task_id === state.selected);
+      if (current && (current.error || current.status === "finished") && state.reportLoaded === null) {
+        /* 不自动打开报告，等用户点击 */
+      }
     }
-  } catch (e) {
-    document.getElementById("reportMsg").textContent = "修复失败: " + e.message;
   }
-  document.getElementById("btnFix").disabled = false;
+  if (anyRunning || (sel && sel.status === "running")) return 1200;
+  return 3000;
 }
 
-refreshAll();
-setInterval(refreshAll, 5000);
+async function loop() {
+  let delay = 3000;
+  try { delay = await tick(); } catch {}
+  state.pollTimer = setTimeout(loop, delay);
+}
+
+/* ---------- 初始化 ---------- */
+async function init() {
+  try {
+    const cfg = await api("/api/config");
+    state.llmAvailable = !!cfg.llm_available;
+    $("targetBadge").textContent = `目标: ${cfg.target}（${cfg.type}）`;
+  } catch {}
+  if (state.llmAvailable) {
+    $("llmBadge").classList.add("on");
+    $("llmBadge").innerHTML = '<span class="dot"></span>LLM 已就绪（DeepSeek）';
+  } else {
+    $("llmBadge").innerHTML = '<span class="dot"></span>LLM 未配置（仅确定性引擎）';
+    ["tgAgent", "tgExplorer", "tgFixPlan"].forEach((id) => {
+      $(id).classList.add("disabled");
+      $(id.replace("tg", "opt")).checked = false;
+    });
+  }
+  $("btnStart").addEventListener("click", startUrlTask);
+  $("btnUpload").addEventListener("click", uploadProject);
+  $("btnReport").addEventListener("click", loadReport);
+  $("btnRemediation").addEventListener("click", loadRemediation);
+  $("btnFix").addEventListener("click", fixNow);
+  await refreshTasks();
+  loop();
+}
+init();
 </script>
 </body>
 </html>

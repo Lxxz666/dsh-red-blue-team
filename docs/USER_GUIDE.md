@@ -32,7 +32,7 @@ pip install -e .                       # 可选：安装 dsh-redteam / dsh-pytho
 | `dsh-redteam bench --config scan.yml` | 自适应优先级基准（随机基线 vs wanter 地形序） |
 | `dsh-redteam samples [list｜show CATEGORY]` | 攻击样本库（54 类别） |
 | `dsh-redteam scenarios [list｜show ID]` | 业务场景库（12 场景指纹与攻击点） |
-| `dsh-redteam web [--config scan.yml] [--port 8766]` | **Web 面板**：网页发起扫描/漏洞清单/报告/一键修复（默认自动挂靶场） |
+| `dsh-redteam web [--config scan.yml] [--port 8766]` | **Web 面板 v2**：网页发起扫描/上传源码解析/任务步骤时间线+实时日志/报告/一键修复（默认自动挂靶场） |
 | `dsh-redteam batch --targets targets.yml [--out DIR]` | **多目标批扫**：串行扫描多个目标 + 风险排序汇总报告 |
 | `dsh-redteam schedule --config scan.yml --every 24h [--webhook URL] [--once]` | **定时扫描**：周期扫描 + 报告按时间留存 + 可选 webhook 推送 |
 
@@ -131,6 +131,35 @@ Agent**。核心是**确定性多轮驱动循环**——不依赖模型"自觉�
 - 攻击上限可经 `engine.llm_agent_max_attacks` 调整（默认 100，可继续调大）；
 - 判定仍走确定性管线（LLM 无法"自我判定成功"）；无 LLM 时优雅降级为空操作。
 
+### LLM 主动侦察工具（V13，opt-in）
+
+```yaml
+engine:
+  llm_agent: true
+  llm_explorer_tools: true         # 开放 http_probe / http_attack 原始探测工具
+```
+
+开启后 LLM 自主攻击 Agent 额外拥有两个工具：
+
+- `http_probe`：GET 任意路径，返回状态码/关键响应头/响应截断（侦察用，不落判定）；
+- `http_attack`：对任意方法/路径/载荷发起原始 HTTP 请求（JSON body 自动识别），
+  判定仍走确定性信号管线（敏感泄露模式 / 服务端异常）。
+
+用途：**跳出预定义业务场景与样本库**，由 LLM 自主探索样本库之外的攻击面
+（隐藏路径、未文档化端点、任意参数注入）。产出 `llm_explored` 类别漏洞，
+并入主扫描结果与修复流程（无内置模板 → 人工修复方案 + 可选 LLM 修复建议）。
+
+### LLM 修复建议（V13，opt-in）
+
+```yaml
+engine:
+  llm_fix_plan: true               # 每条漏洞生成 AI 修复建议
+```
+
+蓝队规划阶段逐条漏洞询问 LLM（根因 → 修复步骤 → 关键代码片段），写入
+`finding.fix.ai_plan` 与方案 `ai_note`，呈现在修复报告「🤖 AI 修复建议」节；
+无 LLM / 调用失败时静默降级为内置模板，流程不中断。
+
 ### 对接真实 HTTP 目标协议约定
 
 - 对话接口：`POST {base_url}/api/chat`，body `{"messages":[{"role":"user","content":"..."}],
@@ -140,7 +169,29 @@ Agent**。核心是**确定性多轮驱动循环**——不依赖模型"自觉�
 - 业务场景识别（可选）：`GET {base_url}/api/meta/business` 返回 `{"scenarios": [...]}`；
   未提供时自动降级为端点探测（有界 GET）。
 
-## 6. 主Agent/子Agent 编排（attack agent 架构）
+## 6. Web 面板 v2（任务追踪）
+
+```bash
+dsh-redteam web --port 8766        # 打开 http://127.0.0.1:8766
+```
+
+面板功能（全部面向验收）：
+
+- **网址输入**：输入 `http://…` 目标 + 四个开关（LLM 自主攻击 / LLM 主动侦察 /
+  LLM 修复建议 / 蓝队自动修复）→ 一键发起完整红队检测；非本地目标需以
+  `--config` 携带 `authorization` 授权块，否则面板直接 403 拒绝；
+- **源码上传**：拖拽/选择 ZIP（≤50MB）→ 面板解压（防 zip-slip）→ 静态代码扫描
+  → 修复方案报告；
+- **进程追踪**：每条任务有**步骤时间线**（侦察→红队攻击→蓝队修复→回归，
+  每步状态/起止时间/耗时/摘要）与**实时日志控制台**（子代理派发、每次攻击
+  执行与判定、漏洞确认逐条滚动，`?after=N` 增量拉取 + JSONL 落盘可回放）；
+- **产物**：攻击报告 / 完整修复报告（面板内 Markdown 渲染），任务完成后可
+  「🛡 蓝队修复」按需触发修复+回归并查看修复报告；
+- **API**：`POST /api/tasks`、`POST /api/tasks/upload`、`GET /api/tasks`、
+  `GET /api/tasks/{id}?after=N`、`GET …/report`、`POST …/fix`、
+  `GET …/remediation`（见 `redteam/web/panel.py`）。
+
+## 7. 主Agent/子Agent 编排（attack agent 架构）
 
 扫描即一场多 Agent 协同任务：
 
@@ -154,7 +205,7 @@ Agent**。核心是**确定性多轮驱动循环**——不依赖模型"自觉�
 全过程事件（`agent/dispatched`、`agent/report`、`attack/verdict`…）写入
 `audit/<scan_id>.jsonl`，可回放审计。
 
-## 7. 报告解读
+## 8. 报告解读
 
 产物（`out_dir/`）：
 - `report_<target>_<时间>.md/.json`：**攻击报告**——漏洞总览/详情（载荷+证据+OWASP
@@ -166,11 +217,11 @@ Agent**。核心是**确定性多轮驱动循环**——不依赖模型"自觉�
 **存疑（suspicious）**：只命中弱信号（基线偏离/慢响应）的样本，**绝不自动上报漏洞**，
 请在审计日志中人工复核。
 
-## 8. 蓝队修复闭环
+## 9. 蓝队修复闭环
 
 ```
 scan → fix --scan <id>
-  ① 规划: 51 类修复模板 → 每条漏洞出方案（问题说明+修复理由，可审计）
+  ① 规划: 68 类修复模板 → 每条漏洞出方案（问题说明+修复理由，可审计）
   ② 应用: lab 目标 → guards 备份 → 收紧防护 → 热重载
           外部/文件夹目标 → 只输出人工实施方案（含代码级示例）
   ③ 回归: 重跑同一样本（uid 确定性重建，含 repeat 多步攻击），必须清零
@@ -178,13 +229,13 @@ scan → fix --scan <id>
   ⑤ 交付: remediation_*.md 完整修复报告
 ```
 
-## 9. 自适应基准解读
+## 10. 自适应基准解读
 
 `dsh-redteam bench` 对靶场跑两轮：**随机基线序**（新手扫描）vs **wanter 地形序**
 （学完第一轮后）。输出命中率@预算对比、覆盖效率（发现全部漏洞类别所需样本数）、
 地形统计（沉积/净刻蚀深度）。
 
-## 10. 常见问题
+## 11. 常见问题
 
 - **Windows 控制台中文乱码**：CLI 已自动重配 UTF-8；仍乱码用 `python -m redteam.cli ...`
   运行或直接看报告文件（UTF-8）。

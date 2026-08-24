@@ -151,6 +151,11 @@ def _finding_block(finding: Finding, plan: Optional[FixPlan],
     else:
         lines.append("无内置修复模板，需人工研判。")
         lines.append("")
+    if plan is not None and getattr(plan, "ai_note", ""):
+        lines.append("### ③½ 🤖 AI 修复建议（LLM）")
+        lines.append("")
+        lines.append(plan.ai_note)
+        lines.append("")
     lines.append("### ④ 修复执行状态")
     lines.append("")
     if fixes:

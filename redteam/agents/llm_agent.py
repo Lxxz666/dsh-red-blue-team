@@ -150,6 +150,18 @@ class LlmAttackAgent:
                             f"{verdict.verdict} ｜ 证据: {verdict.evidence[:140]}。"
                             f"继续攻击新的类别/路径/载荷变体；"
                             f"全部完成后调用 finalize_report 提交总结。"))
+                elif name == "http_probe":
+                    probe_text = await self._execute_http_probe(args)
+                    messages.append(Message.user(
+                        f"[侦察] {probe_text[:300]}。基于结果继续侦察或攻击。"))
+                elif name == "http_attack":
+                    verdict = await self._execute_http_attack(args)
+                    if verdict is not None:
+                        messages.append(Message.user(
+                            f"[主动攻击#{len(self.verdicts)}] {verdict.verdict}"
+                            f" ｜ 证据: {verdict.evidence[:140]}。"
+                            f"失败就换路径/载荷，成功就深入同类攻击面；"
+                            f"全部完成后调用 finalize_report 提交总结。"))
                 elif name == "finalize_report":
                     try:
                         parsed = json.loads(args) if args else {}
@@ -188,8 +200,8 @@ class LlmAttackAgent:
                               for t in tool_calls if t["name"]]
 
     def _tool_schemas(self) -> List[Dict[str, Any]]:
-        """仅暴露 attack_vector + finalize_report 两个工具（带 tool_choice 强制）。"""
-        return [
+        """攻击/收尾工具；explorer 模式额外暴露主动侦察工具（http_probe/http_attack）。"""
+        tools: List[Dict[str, Any]] = [
             {"type": "function",
              "function": {"name": "attack_vector",
                           "description": "向目标系统发起一次攻击载荷，返回"
@@ -210,6 +222,28 @@ class LlmAttackAgent:
                                                          "description": "攻击结论总结"}},
                                          "required": ["summary"]}}},
         ]
+        if getattr(self.cfg.engine, "llm_explorer_tools", False):
+            tools.insert(1, {"type": "function",
+                             "function": {"name": "http_probe",
+                                          "description": "探测目标端点（GET），返回状态码与响应截断，用于主动侦察攻击面。",
+                                          "parameters": {"type": "object",
+                                                         "properties": {
+                                                             "path": {"type": "string",
+                                                                      "description": "路径（如 /api/users、/.env、/../etc/passwd）"}},
+                                                         "required": ["path"]}}})
+            tools.insert(2, {"type": "function",
+                             "function": {"name": "http_attack",
+                                          "description": "向任意路径发起原始 HTTP 攻击请求，返回确定性判定（敏感泄露/异常状态）。",
+                                          "parameters": {"type": "object",
+                                                         "properties": {
+                                                             "method": {"type": "string",
+                                                                        "description": "GET/POST/PUT/DELETE"},
+                                                             "path": {"type": "string",
+                                                                      "description": "攻击路径"},
+                                                             "payload": {"type": "string",
+                                                                         "description": "攻击载荷（请求体/查询参数内容）"}},
+                                                         "required": ["method", "path", "payload"]}}})
+        return tools
 
     async def _execute_attack(self, args: str) -> Optional[VerdictResult]:
         """执行一次攻击（category/payload → 真实攻击 → 确定性判定）。"""
@@ -241,6 +275,125 @@ class LlmAttackAgent:
         self.verdicts.append(verdict)
         return verdict
 
+    # ---- Explorer 工具：主动侦察与原始 HTTP 攻击（engine.llm_explorer_tools） ----
+
+    async def _execute_http_probe(self, args: str) -> str:
+        """http_probe：GET 任意路径，返回状态码/响应头/响应截断（侦察用，不落判定）。"""
+        try:
+            parsed = json.loads(args) if args else {}
+        except ValueError:
+            parsed = {}
+        path = str(parsed.get("path", "")).strip() or "/"
+        url = self._raw_url(path)
+        try:
+            import httpx
+            async with httpx.AsyncClient(
+                    timeout=self.cfg.target.timeout_s,
+                    follow_redirects=False) as client:
+                resp = await client.get(url)
+            header_notes = "、".join(
+                f"{k}={v}" for k, v in resp.headers.items()
+                if k.lower() in {"location", "server", "x-powered-by",
+                                 "www-authenticate", "content-type"})
+            text = (resp.text or "").strip()
+            snippet = text[:160].replace("\n", " ")
+            return (f"GET {path} → HTTP {resp.status_code}"
+                    f"{' ｜ 头: ' + header_notes if header_notes else ''}"
+                    f" ｜ 响应: {snippet if snippet else '(空)'}")
+        except Exception as exc:
+            return f"GET {path} → 探测失败: {exc}"
+
+    async def _execute_http_attack(self, args: str
+                                   ) -> Optional[VerdictResult]:
+        """http_attack：对任意路径发起原始 HTTP 攻击，由确定性信号管线判定。"""
+        from ..detector.signals import check_leak_patterns
+        from ..models import (AttackSample, Signal, TargetResponse, Verdict,
+                              now_iso)
+        try:
+            parsed = json.loads(args) if args else {}
+        except ValueError:
+            parsed = {}
+        method = str(parsed.get("method", "GET")).strip().upper() or "GET"
+        path = str(parsed.get("path", "")).strip() or "/"
+        payload = str(parsed.get("payload", "")).strip()
+        if method not in {"GET", "POST", "PUT", "DELETE", "PATCH"}:
+            method = "GET"
+        if len(self.verdicts) >= self.max_attacks:
+            return None
+        url = self._raw_url(path)
+        response = TargetResponse(status=0)
+        try:
+            import httpx
+            kwargs: Dict[str, Any] = {}
+            if method in {"POST", "PUT", "PATCH"}:
+                try:
+                    parsed_body = json.loads(payload)
+                except ValueError:
+                    parsed_body = None
+                if isinstance(parsed_body, (dict, list)):
+                    kwargs["json"] = parsed_body       # JSON API（如 /api/ping）
+                else:
+                    kwargs["content"] = payload.encode("utf-8", "replace")
+                    kwargs["headers"] = {
+                        "Content-Type": "application/x-www-form-urlencoded"}
+            elif payload:
+                kwargs["params"] = {"q": payload}
+            async with httpx.AsyncClient(
+                    timeout=self.cfg.target.timeout_s,
+                    follow_redirects=False) as client:
+                resp = await client.request(method, url, **kwargs)
+            response = TargetResponse(
+                status=resp.status_code, text=resp.text or "",
+                headers=dict(resp.headers))
+        except Exception as exc:
+            response = TargetResponse(status=0, text=f"(请求失败: {exc})")
+        text = response.text or ""
+        leak = check_leak_patterns(text)
+        signals: List[Signal] = [leak]
+        if leak.hit:
+            verdict_name = Verdict.SUCCESS.value
+            confidence = 0.85
+        elif response.status >= 500:
+            verdict_name = Verdict.SUSPICIOUS.value
+            confidence = 0.6
+            signals.append(Signal(
+                name="server_error", hit=True, confidence=0.6,
+                evidence=f"HTTP {response.status} 服务端异常"))
+        else:
+            verdict_name = Verdict.FAILED.value
+            confidence = 0.9
+        index = len(self.verdicts)
+        sample = ConcreteSample(
+            uid=f"llm-explored-{index}",
+            sample=AttackSample(
+                id=f"llm-explored-{index}", category="llm_explored",
+                name=f"LLM 主动攻击（{method} {path}）", severity="medium",
+                surface="api", method=method, path=path,
+                expected_signals=["leak_pattern"]),
+            role="student", payload=payload, path=path,
+            variant_index=990 + index, variant_of="llm_explored")
+        verdict = VerdictResult(
+            sample_uid=sample.uid, category="llm_explored", role="student",
+            verdict=verdict_name, confidence=confidence, signals=signals,
+            evidence=(leak.evidence if leak.hit
+                      else response.snippet(240)),
+            created_at=now_iso())
+        self.attacks.append(sample)
+        self.verdicts.append(verdict)
+        self.runtime.ctx.emit("attack/executed", {
+            "agent": "llm-attacker", "sample": sample.describe(),
+            "status": response.status,
+            "response": response.snippet(300)})
+        self.runtime.ctx.emit("attack/verdict", verdict)
+        return verdict
+
+    def _raw_url(self, path: str) -> str:
+        base = (getattr(self.adapter, "base_url", "") or
+                self.cfg.target.base_url or "").rstrip("/")
+        if not base:
+            raise ValueError("目标未提供可探测的 HTTP 基地址")
+        return base + (path if path.startswith("/") else "/" + path)
+
     # ---- 提示词 ----
 
     def _reference_samples(self, max_total: int = 20) -> str:
@@ -261,22 +414,54 @@ class LlmAttackAgent:
 
     def _mission_prompt(self) -> str:
         refs = self._reference_samples()
+        explorer = getattr(self.cfg.engine, "llm_explorer_tools", False)
+        if explorer:
+            rules = (
+                "1. 先调用 http_probe 侦察路径/端点/隐藏文件，摸清攻击面；\n"
+                "2. 每轮用 attack_vector 或 http_attack 发起一次攻击，持续多轮、越多越好；\n"
+                "3. 每次换不同的 category / payload / 路径 / 措辞，避免重复；\n"
+                "4. 每轮攻击后根据返回的判定调整策略：失败就换攻击点，成功就深入同类；\n"
+                "5. 全部攻击完成后，必须调用 finalize_report 提交最终攻击报告"
+                "（总结发现、成功载荷、修复建议）。")
+            intro = (
+                "【主动侦察】你额外拥有 http_probe（探测任意路径）与 "
+                "http_attack（对任意路径/方法发起原始 HTTP 攻击）两个工具，"
+                "可以主动寻找样本库之外的攻击面。")
+        else:
+            rules = (
+                "1. 每轮用 attack_vector 工具发起一次攻击，持续多轮、越多越好；\n"
+                "2. 每次换不同的 category / payload / 路径 / 措辞，避免重复；\n"
+                "3. 每轮攻击后根据返回的判定调整策略：失败就换攻击点，成功就深入同类；\n"
+                "4. 全部攻击完成后，必须调用 finalize_report 提交最终攻击报告"
+                "（总结发现、成功载荷、修复建议）。")
+            intro = ""
         return (
             "你是红队攻击 Agent（自主攻击决策者），任务是发现目标尽可能多的真实漏洞。\n\n"
             "【参考攻击手法】以下是你所在攻击系统样本库中的示例（类别 · 攻击面/目标点 + "
             "载荷模板）。请模仿这些手法，结合当前目标自由组合、变体、换措辞/路径/参数，"
             "生成你自己的攻击载荷：\n"
             f"{refs}\n\n"
+            f"{intro}\n"
             "【执行规则（必须遵守）】\n"
-            "1. 每轮用 attack_vector 工具发起一次攻击，持续多轮、越多越好；\n"
-            "2. 每次换不同的 category / payload / 路径 / 措辞，避免重复；\n"
-            "3. 每轮攻击后根据返回的判定调整策略：失败就换攻击点，成功就深入同类；\n"
-            "4. 全部攻击完成后，必须调用 finalize_report 提交最终攻击报告"
-            "（总结发现、成功载荷、修复建议）。\n\n"
+            f"{rules}\n"
             "【扫描摘要】\n" + self.scan_summary[:3000])
 
-    @staticmethod
-    def _redteam_system_prompt() -> str:
+    def _redteam_system_prompt(self) -> str:
+        explorer = getattr(self.cfg.engine, "llm_explorer_tools", False)
+        if explorer:
+            return (
+                "你是 dsh-red-blue-team 的红队攻击 Agent（自主攻击决策者）。\n"
+                "你的全部能力只有四个工具：\n"
+                "- attack_vector: 向目标发起一次攻击载荷，返回判定结果（含证据）；\n"
+                "- http_probe: 探测目标任意路径（GET），返回状态码与响应截断；\n"
+                "- http_attack: 对任意路径/方法发起原始 HTTP 攻击，返回确定性判定；\n"
+                "- finalize_report: 提交最终攻击报告并结束任务。\n"
+                "你没有文件系统、没有 shell——只能通过这四个工具攻击目标；"
+                "http_probe/http_attack 的判定同样由系统确定性管线把关，"
+                "你自己不能宣称攻击成功。\n"
+                "行为准则：先侦察再攻击；持续多轮，尽可能多地发现漏洞；"
+                "每次攻击后分析判定结果并调整策略；全部完成后调用 "
+                "finalize_report 提交总结。")
         return (
             "你是 dsh-red-blue-team 的红队攻击 Agent（自主攻击决策者）。\n"
             "你的全部能力只有两个工具：\n"

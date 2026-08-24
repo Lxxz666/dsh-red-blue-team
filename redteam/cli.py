@@ -792,13 +792,14 @@ def cmd_web(args: argparse.Namespace) -> None:
     """Web 面板：dsh-redteam web [--config scan.yml] [--with-lab]（阻塞运行）"""
     lab = None
     guards_file = ""
+    runtime_dir = os.path.join(os.getcwd(), "web_runtime")
+    os.makedirs(runtime_dir, exist_ok=True)
     if args.config and not args.with_lab:
         cfg = ScanConfig.from_yaml(args.config)
     else:
-        # 默认模式：自动起内置靶场作为目标（含 4 业务场景）
+        # 默认模式：自动起内置靶场作为目标
         from target_lab import build_default_guards_file, start_lab
-        out_dir = os.path.join(os.getcwd(), "web_runtime")
-        os.makedirs(out_dir, exist_ok=True)
+        out_dir = runtime_dir
         guards_file = os.path.join(out_dir, "lab_guards.yml")
         build_default_guards_file(guards_file)
         lab = start_lab(guards_file=guards_file, port=0)
@@ -822,10 +823,11 @@ def cmd_web(args: argparse.Namespace) -> None:
                 "engine": {"concurrency": 4, "min_interval_ms": 5},
             })
     from .web.panel import create_app
-    app = create_app(cfg, lab=lab)
+    app = create_app(cfg, runtime_dir, lab=lab)
     import uvicorn
     print(f"🔴🔵 dsh-red-blue-team Web 面板: http://{args.host}:{args.port}")
-    print(f"   目标: {cfg.target.name}（{cfg.target.base_url or cfg.target.folder_path}）")
+    print(f"   默认目标: {cfg.target.name}（{cfg.target.base_url or cfg.target.folder_path}）")
+    print(f"   面板支持: 输入任意网址扫描 / 上传项目 ZIP 解析 / 任务步骤与日志追踪")
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
 
 

@@ -42,6 +42,8 @@ demo_static_out/
 tmp_*/
 lab_guards.yml
 redteam.db
+# Web 面板运行产物（任务日志/上传项目/扫描输出）
+/web_runtime/
 
 # IDE
 .idea/

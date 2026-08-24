@@ -9,7 +9,7 @@
 
 ![CI](https://github.com/Lxxz666/dsh-red-blue-team/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-357%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-371%20passed-brightgreen)
 ![发现率](https://img.shields.io/badge/埋入漏洞发现率-100%25-brightgreen)
 ![误报](https://img.shields.io/badge/修复后复扫-0%20命中-blue)
 ![靶场](https://img.shields.io/badge/内置靶场-53%20漏洞-red)
@@ -28,7 +28,8 @@
 | "改价/叠券/重复退款安全吗？" | "建议人工测试业务逻辑" | 🎯 **12 大业务场景**专属攻击样本（WSTG-BUSL 方法论），1 元买 299 元商品当场复现 |
 | "Agent 挂了 MCP 工具安全吗？" | "不确定" | 🎯 直接向 MCP 工具注入恶意参数打一遍 |
 | "代码里有硬编码密钥吗？" | "建议用 SAST" | 🎯 文件夹代码级审计，**file:line 级证据** + 依赖 CVE-lite 比对 |
-| "发现漏洞后怎么修？" | "自己看文档吧" | 🎯 **68 类修复模板**（问题说明+代码级 before/after）→ 沙箱自动修复 → 回归清零 |
+| "发现漏洞后怎么修？" | "自己看文档吧" | 🎯 **68 类修复模板**（问题说明+代码级 before/after）→ 沙箱自动修复 → 回归清零，可选 **LLM 逐条生成修复建议** |
+| "样本库没覆盖的攻击面呢？" | "扫不到" | 🎯 **LLM 主动侦察模式**：`http_probe`/`http_attack` 原始探测工具，LLM 自主探索样本库之外的路径/参数/端点 |
 | "每次都要从头扫吗？" | "是" | 🎯 wanter 自适应地形记住"这个目标最怕什么"，**二次扫描更早命中** |
 
 ---
@@ -106,10 +107,12 @@ requirements.txt:1  🟠 django==3.2.20 命中 CVE-lite 已知漏洞区间
 | 🐞 埋入漏洞发现率 | **53/53 = 100%** | 内置靶场 53 个埋入漏洞（验收线 ≥80%），`test_scan_e2e` 每次 CI 强制 |
 | 🛡️ 误报率（全加固靶场复扫） | **0 命中** | 修复完成的靶场复扫必须清零，否则 CI 失败 |
 | 🔧 修复闭环 | **113 命中 → 113 修复 → 113 回归通过 → 复扫 0 命中** | 蓝队自动修复+回归验证，同一攻击重跑必须清零 |
-| 🧪 测试规模 | **357 passed**（框架 224 + 红蓝队 133） | 全链路覆盖，GitHub Actions 双 Python 版本 |
+| 🧪 测试规模 | **371 passed**（框架 224 + 红蓝队 147） | 全链路覆盖，GitHub Actions 双 Python 版本 |
 | 🎲 扫描确定性 | **两次扫描命中集合完全一致** | 状态型样本串行通道+重置隔离，报告可复现审计 |
 | 🧠 自适应收益（wanter 地形） | 25% 预算下命中率 **+10.5%**，覆盖效率 **+9.0%** | bench 命令：随机基线 vs 地形序二次扫描对比 |
 | 🤖 LLM 自主攻击（实测） | 单轮 **100 次自主攻击 · 37 漏洞命中 · 18 攻击类别** | `engine.llm_agent: true` + DeepSeek 密钥，确定性多轮循环驱动（上限可配） |
+| 🔎 LLM 主动侦察 | **http_probe / http_attack 原始探测工具** | 不限于预定义场景：LLM 自主探测任意路径/方法，判定仍走确定性信号管线 |
+| 🧠 LLM 修复建议 | **每条漏洞生成 AI 修复方案** | `engine.llm_fix_plan: true`，呈现在修复报告「🤖 AI 修复建议」节，无 LLM 自动降级 |
 | 🗺️ 检测面 | **71 条基础样本 × 62 个攻击类别** | D1 Web / D2 API / D3 LLM / D7 配置 + D19 业务场景 + MCP 工具面 |
 | 🏪 业务场景 | **12 大场景**（电商/金融/教育/SaaS/社交/医疗/游戏/外卖/招聘/直播/会员/政务） | 指纹自动识别，场景专属样本自动加载 |
 
@@ -130,10 +133,11 @@ AttackOrchestrator（主 Agent）
   │     attacker-student   ─┐
   │     attacker-customer  ─┼─ WorkerReport{判定/证据} ─┐
   │     attacker-admin     ─┘                           │
+  ├─④b LLM 自主攻击 Agent（确定性多轮循环，可选 http_probe/http_attack 主动侦察）│
   ├─⑤ 主Agent汇总 → 漏洞落库 → 攻击报告（含态势综述）◀──┘
   ▼
-BlueEngine（蓝队）：68 类修复模板 → 沙箱应用 → 回归清零 → 完整修复报告
-Web 面板：dsh-redteam web（网页发起扫描/漏洞清单/报告/一键修复）
+BlueEngine（蓝队）：68 类修复模板 [+ LLM 修复建议] → 沙箱应用 → 回归清零 → 完整修复报告
+Web 面板：dsh-redteam web（网址输入/源码上传 → 步骤时间线+实时日志追踪 → 报告/一键修复）
 ```
 
 - **🎯 确定性判定**：证据模式/敏感泄露/副作用探测/重定向/安全头缺失等硬信号优先，弱信号只标记存疑——**绝不误报成功**（拒绝话术"删除订单需要人工审批"≠攻击成功，有测试保证）
@@ -161,8 +165,8 @@ python -m redteam.cli static <你的项目文件夹>
 # ④ 给一个 MCP 服务：工具面攻击（tools/call 注入恶意参数）
 python -m redteam.cli scan --config examples/scan_mcp.yaml
 
-# ⑤ Web 面板：网页发起扫描/看漏洞/跑修复（默认自动挂内置靶场）
-python -m redteam.cli web --port 8766
+# ⑤ Web 面板：网页发起扫描/上传源码解析/步骤日志追踪（默认自动挂内置靶场）
+python -m redteam.cli web --port 8766   # 打开 http://127.0.0.1:8766
 
 # ⑥ 多目标批扫 / 定时扫描
 python -m redteam.cli batch --targets examples/targets.yml
@@ -204,7 +208,7 @@ dsh-red-blue-team/
 │                        #   adaptive(wanter地形) adapters(http/sdk/mcp) engine storage audit runtime config models
 ├── target_lab/          # 内置靶场（53 埋入漏洞 + 12 大业务场景 API + 可修复 guards）
 ├── sample_bank/         # 71 条攻击样本（YAML，四大检测面 + 12 业务场景 + MCP 工具面 + 多轮链模板）
-├── tests/ + tests_redteam/  # 357 项测试（含发现率≥80%、零误报、回归清零、MCP/攻击链/LLM自主Agent/Web 验收）
+├── tests/ + tests_redteam/  # 371 项测试（含发现率≥80%、零误报、回归清零、MCP/攻击链/LLM自主Agent/主动侦察/Web 验收）
 ├── .github/workflows/   # GitHub Actions CI（双 Python 版本全量测试 + 靶场验收）
 ├── examples/  docs/     # 示例配置（网址/文件夹/MCP）/ 架构·用户·攻击目录·场景·合规文档
 └── README.md
@@ -227,11 +231,12 @@ dsh-red-blue-team/
 | V5 | MCP 目标适配：dsh.mcp 直连工具面（工具滥用/越权/投毒样本） |
 | V6 | LLM 载荷变体生成（opt-in，DeepSeek 可用时增强攻击计划） |
 | V7 | 多轮攻击链编排 + V8 Web 面板 |
-| V8 | Web 面板：FastAPI + 原生 JS（扫描/漏洞/报告/一键修复） |
+| V8 | Web 面板 v1：FastAPI + 原生 JS（扫描/漏洞/报告/一键修复） |
 | V9 | LLM 定向补打轮（分析未命中向量 → 针对性攻击链 → 第二轮） |
 | V10 | 定时扫描 + 多目标批扫 + 静态规则扩至 21 条 |
 | V11 | LLM 自主攻击 Agent：**确定性多轮驱动循环**（每轮强制工具调用，持续攻击至预算/超时） |
 | V12 | Webhook 报告推送（钉钉/企微/邮件网关） |
+| V13 | Web 面板 v2（网址输入/源码上传、任务步骤时间线+实时日志、LLM 模式开关） + LLM 主动侦察工具（http_probe/http_attack）+ LLM 逐条修复建议 |
 
 **红队（多检测面×多场景×多Agent×LLM 自主）→ 蓝队（修复-回归-报告）→ 产品化（Web/批扫/定时/推送/CI）闭环全部落地。**
 

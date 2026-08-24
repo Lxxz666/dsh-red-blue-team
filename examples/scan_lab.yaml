@@ -51,5 +51,12 @@ engine:
   concurrency: 4             # 并发上限（副作用样本自动串行）
   min_interval_ms: 20        # 请求节流（防把目标打挂）
   max_errors: 20
+  agent_mode: true           # 主Agent+子Agent 编排
+  # ---- LLM 自主攻击（需 DEEPSEEK_API_KEY，opt-in）----
+  llm_agent: false           # LLM 自主攻击 Agent（确定性多轮驱动循环）
+  llm_agent_max_attacks: 100 # 自主攻击次数上限
+  llm_agent_timeout_s: 600   # 循环总超时
+  llm_explorer_tools: false  # 开放 http_probe/http_attack：LLM 跳出样本库主动侦察
+  llm_fix_plan: false        # 蓝队逐条漏洞生成 LLM 修复建议（进修复报告）
 
 out_dir: "./reports"

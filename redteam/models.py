@@ -253,6 +253,7 @@ class FixPlan:
     rationale: str = ""                # 为什么这么修（审计要求）
     ops: List[Dict[str, Any]] = field(default_factory=list)
     manual_steps: List[str] = field(default_factory=list)
+    ai_note: str = ""                  # LLM 生成的修复建议（engine.llm_fix_plan）
 
     def to_json(self) -> Dict[str, Any]:
         return asdict(self)

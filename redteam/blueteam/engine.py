@@ -71,9 +71,17 @@ class BlueEngine:
         ctx = self.runtime.ctx
         result = BlueResult()
 
-        # ① 规划：每条漏洞 → 修复方案（模板库 + 目标配置）
+        # ① 规划：每条漏洞 → 修复方案（模板库 + 目标配置 [+ LLM 修复建议]）
         for finding in self.findings:
             plan = self._plan(finding)
+            if getattr(self.cfg.engine, "llm_fix_plan", False):
+                ai_note = await self._ai_fix_note(finding, plan)
+                if ai_note:
+                    plan.ai_note = ai_note
+                    finding.fix["ai_plan"] = ai_note
+                    ctx.emit("fix/ai_planned", {
+                        "finding_id": finding.finding_id,
+                        "category": finding.category})
             result.plans.append(plan)
             ctx.emit("fix/planned", plan)
             self.runtime.storage.update_finding_fix(
@@ -81,6 +89,8 @@ class BlueEngine:
                 plan.title, "planned" if plan.auto_fixable else "manual")
 
         if not apply_fixes:
+            # 只出方案：修复报告同样交付（含分步指引与验证步骤）
+            self._write_report(result)
             return result
 
         # ② 执行：lab 目标在沙箱应用（版本化 + 可回滚）；外部目标只出方案
@@ -121,19 +131,23 @@ class BlueEngine:
                         finding.finding_id)
 
         # ④ 完整修复报告（问题说明 + 代码级修复 + 验证步骤 + 回归结果）
-        if result.plans:
-            from ..reporter.remediation import write_remediation_report
-            try:
-                target = self.scan.target if self.scan is not None else "manual"
-                scan_id = (self.scan.scan_id if self.scan is not None
-                           else "manual")
-                result.remediation_path = write_remediation_report(
-                    target, scan_id, self.findings,
-                    self.cfg.out_dir, result.plans, result.fixes,
-                    result.regressions)
-            except OSError as exc:
-                log.warning("修复报告写入失败: %s", exc)
+        self._write_report(result)
         return result
+
+    def _write_report(self, result: BlueResult) -> None:
+        if not result.plans:
+            return
+        from ..reporter.remediation import write_remediation_report
+        try:
+            target = self.scan.target if self.scan is not None else "manual"
+            scan_id = (self.scan.scan_id if self.scan is not None
+                       else "manual")
+            result.remediation_path = write_remediation_report(
+                target, scan_id, self.findings,
+                self.cfg.out_dir, result.plans, result.fixes,
+                result.regressions)
+        except OSError as exc:
+            log.warning("修复报告写入失败: %s", exc)
 
     # ---- ① 规划 ----
 
@@ -155,6 +169,38 @@ class BlueEngine:
                        template_id=template.template_id, title=template.title,
                        rationale=template.rationale, ops=ops,
                        manual_steps=list(template.manual_steps))
+
+    # ---- ①b LLM 修复建议（engine.llm_fix_plan；无 LLM 确定性降级为模板） ----
+
+    async def _ai_fix_note(self, finding: Finding, plan: FixPlan) -> str:
+        """让 LLM 针对单条漏洞给出修复建议；失败则静默降级（模板仍有效）。"""
+        llm = self.runtime.llm
+        if not llm or "deepseek" not in llm.providers():
+            return ""
+        try:
+            from dsh.llm.adapters import LlmCallConfig, LlmRequest
+            from dsh.llm.messages import Message
+            prompt = (
+                f"你是蓝队修复工程师。针对以下漏洞给出简洁中文修复建议"
+                f"（根因 → 具体修复步骤 → 关键代码片段，200 字内）：\n"
+                f"- 漏洞类别: {finding.category}\n"
+                f"- 严重级别: {finding.severity}\n"
+                f"- 攻击证据: {finding.evidence[:300]}\n"
+                f"- 内置方案: {plan.title}｜{plan.rationale[:200]}\n")
+            request = LlmRequest(
+                config=LlmCallConfig(
+                    provider="deepseek",
+                    model=os.environ.get("DEEPSEEK_MODEL", "deepseek-chat"),
+                    max_tokens=400),
+                messages=[Message.user(prompt)])
+            out = ""
+            async for chunk in llm.stream(request):
+                if getattr(chunk, "text", ""):
+                    out += chunk.text
+            return out.strip()[:1200]
+        except Exception as exc:
+            log.warning("LLM 修复建议生成失败，使用内置模板: %s", exc)
+            return ""
 
     # ---- ② 执行（沙箱 + 版本化） ----
 
