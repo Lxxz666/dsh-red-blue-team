@@ -79,3 +79,9 @@ async def test_schedule_once(vuln_lab, tmp_path):
     assert len(runs) == 1
     reports = os.listdir(os.path.join(out, runs[0], "reports"))
     assert any(f.startswith("report_") for f in reports)
+
+
+async def test_push_webhook_failure_is_graceful():
+    """webhook 不可达：打印失败而非抛异常（推送是尽力而为）。"""
+    from redteam.cli import _push_webhook
+    await _push_webhook("http://127.0.0.1:1/never", {"event": "test"})

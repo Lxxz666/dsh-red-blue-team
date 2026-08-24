@@ -186,8 +186,9 @@ dsh-red-blue-team/
 - [x] V9 LLM 定向补打轮（opt-in）：分析首轮未命中向量 → LLM 生成针对性攻击链 → 第二轮补打
 - [x] V10 定时扫描 + 多目标批扫：`schedule`（周期扫描/报告留存/webhook 推送）、
   `batch`（targets.yml 串行扫描 + 风险排序汇总）；静态规则扩展至 21 条（npm CVE-lite/JWT 弱密钥/明文 HTTP/Terraform/K8s/Java/Go/令牌文件）
+- [x] V12 报告推送：`scan`/`fix`/`schedule` 支持 `--webhook` POST JSON 摘要
+  （可接钉钉/企微/邮件网关）；`report --remediation` 查看完整修复报告
 - [ ] V11 子Agent 升级为完整 LLM agent loop（LLM 驱动的自主攻击决策）
-- [ ] V12 报告推送渠道扩展（邮件/IM）
 
 ## 📄 License
 

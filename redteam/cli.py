@@ -55,6 +55,7 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--fix", action="store_true",
                       help="扫描后自动执行蓝队修复+回归（仅 lab 目标自动应用）")
     scan.add_argument("--mode", default=None, help="扫描模式标签（默认取 profile）")
+    scan.add_argument("--webhook", default="", help="扫描完成后 POST JSON 摘要（V12 推送）")
 
     static = sub.add_parser("static", help="本地文件夹快速静态扫描（免配置）")
     static.add_argument("folder", help="项目文件夹路径")
@@ -66,6 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
     fix.add_argument("--config", required=True, help="扫描配置 scan.yml")
     fix.add_argument("--scan", required=True, help="扫描编号（dsh-redteam report --list）")
     fix.add_argument("--dry-run", action="store_true", help="只生成修复方案，不应用")
+    fix.add_argument("--webhook", default="", help="修复完成后 POST JSON 摘要（V12 推送）")
 
     lab = sub.add_parser("lab", help="启动内置靶场")
     lab.add_argument("--port", type=int, default=8765)
@@ -76,6 +78,8 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--scan", default=None, help="扫描编号")
     report.add_argument("--list", action="store_true", help="列出历史扫描")
     report.add_argument("--json", action="store_true", help="输出 JSON 报告")
+    report.add_argument("--remediation", action="store_true",
+                        help="查看该扫描的完整修复报告（fix 后生成）")
 
     bench = sub.add_parser("bench", help="自适应优先级基准（二次扫描命中率提升）")
     bench.add_argument("--config", required=True, help="扫描配置 scan.yml")
@@ -231,6 +235,15 @@ async def cmd_scan(args: argparse.Namespace) -> None:
                             scan_mode=args.mode or cfg.profile)
         result = await runner.run()
         _print_scan_summary(result)
+        if args.webhook:
+            await _push_webhook(args.webhook, {
+                "event": "scan_finished",
+                "scan_id": result.scan_id,
+                "target": result.target,
+                "success": result.success_count,
+                "findings": len(result.findings),
+                "severity_counts": result.severity_counts(),
+                "report": result.report_path})
         if (args.fix or cfg.blueteam.enabled) and adapter is not None \
                 and cfg.target.type != "folder":
             print("\n--- 蓝队修复 ---")
@@ -242,6 +255,17 @@ async def cmd_scan(args: argparse.Namespace) -> None:
         if adapter is not None:
             await adapter.close()
         await runtime.close()
+
+
+async def _push_webhook(url: str, payload: Dict[str, Any]) -> None:
+    """POST JSON 摘要到 webhook（V12 推送渠道：可接钉钉/企微/邮件网关）。"""
+    import httpx as _httpx
+    try:
+        async with _httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(url, json=payload)
+            print(f"webhook 推送: HTTP {response.status_code}")
+    except Exception as exc:
+        print(f"webhook 推送失败: {exc}")
 
 
 async def cmd_static(args: argparse.Namespace) -> None:
@@ -303,8 +327,24 @@ async def cmd_fix(args: argparse.Namespace) -> None:
                 apply_fixes=False)
             print(f"  修复方案 {len(outcome.plans)} 条 ｜ "
                   f"修复报告: {outcome.remediation_path}")
+            if args.webhook:
+                await _push_webhook(args.webhook, {
+                    "event": "fix_finished", "scan_id": args.scan,
+                    "plans": len(outcome.plans),
+                    "remediation": outcome.remediation_path})
             return
-        await _run_blue(runtime, cfg, adapter, result, apply=not args.dry_run)
+        from .blueteam import BlueEngine
+        blue = BlueEngine(runtime, cfg, adapter, result)
+        outcome = await blue.run(apply_fixes=not args.dry_run)
+        summary = outcome.summary()
+        print(f"  修复方案 {summary['plans']} 条 ｜ 应用 {summary['applied']} 条"
+              f" ｜ 回归通过 {summary['verified']} 条 ｜ "
+              f"修复报告: {outcome.remediation_path}")
+        if args.webhook:
+            await _push_webhook(args.webhook, {
+                "event": "fix_finished", "scan_id": args.scan,
+                "summary": summary,
+                "remediation": outcome.remediation_path})
     finally:
         if adapter is not None:
             await adapter.close()
@@ -353,6 +393,18 @@ async def cmd_report(args: argparse.Namespace) -> None:
                       f"{row['success_count']:>4}")
             return
         result = await _load_scan_result(runtime, runtime.storage, args.scan)
+        # 完整修复报告查看（fix 后生成于 out_dir）
+        if args.remediation:
+            safe_target = "".join(ch if ch.isalnum() or ch in "-_" else "_"
+                                  for ch in result.target)
+            path = os.path.join(cfg.out_dir,
+                                f"remediation_{safe_target}_{args.scan}.md")
+            if not os.path.exists(path):
+                raise RedTeamError(
+                    f"修复报告不存在: {path}（先执行 dsh-redteam fix --scan "
+                    f"{args.scan}）")
+            print(open(path, encoding="utf-8").read())
+            return
         from .reporter import write_report
         # 目标显示：文件夹目标显示路径；场景从侦察快照恢复
         if cfg.target.type == "folder":

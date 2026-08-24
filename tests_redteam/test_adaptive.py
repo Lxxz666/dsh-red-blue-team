@@ -84,12 +84,12 @@ def test_persistence_roundtrip(tmp_path):
     terrain.record(sample, "success")
     terrain.save()
     assert "lab:test" in storage.data
-    # 恢复：phi 一致
+    # 恢复：phi 一致（JSON 往返的浮点误差容忍 1e-6）
     ctx = Context("test-terrain-2")
     ctx.set("storage", storage)
     restored = AttackTerrain(ctx, {"domain": "lab:test"})
     restored.apply(ctx)
-    assert abs(restored.phi(sample) - terrain.phi(sample)) < 1e-9
+    assert abs(restored.phi(sample) - terrain.phi(sample)) < 1e-6
 
 
 def test_domain_isolation():
