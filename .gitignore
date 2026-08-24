@@ -9,6 +9,10 @@ __pycache__/
 # 运行产物
 .dsh/
 storage.json
+# 密钥文件（火山方舟/DeepSeek API 凭据）——严禁提交
+.env
+.env.*
+!.env.example
 examples/*.svg
 !examples/wanter_panel_preview.svg
 !examples/wanter_double_well.svg

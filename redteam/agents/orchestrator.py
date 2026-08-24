@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Any, Dict, List, Optional, Sequence
 
 from ..config import ScanConfig
@@ -473,7 +474,9 @@ class AttackOrchestrator:
             prompt = (f"你是红队安全分析师。基于以下扫描摘要，用 100 字以内的中文"
                       f"写一段管理层可读的攻击态势综述：\n{text}")
             request = LlmRequest(
-                config=LlmCallConfig(provider="deepseek", model="deepseek-chat",
+                config=LlmCallConfig(provider="deepseek",
+                                     model=os.environ.get("DEEPSEEK_MODEL",
+                                                          "deepseek-chat"),
                                      max_tokens=200),
                 messages=[Message("user", prompt)])
             out = ""

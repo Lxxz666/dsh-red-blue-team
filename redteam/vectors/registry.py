@@ -195,7 +195,9 @@ class VectorRegistry(Service):
             from dsh.llm.adapters import LlmCallConfig, LlmRequest
             from dsh.llm.messages import Message
             request = LlmRequest(
-                config=LlmCallConfig(provider="deepseek", model="deepseek-chat",
+                config=LlmCallConfig(provider="deepseek",
+                                     model=os.environ.get("DEEPSEEK_MODEL",
+                                                          "deepseek-chat"),
                                      max_tokens=500, temperature=0.8),
                 messages=[Message.user(prompt)])
             text = ""
@@ -230,7 +232,9 @@ class VectorRegistry(Service):
             from dsh.llm.adapters import LlmCallConfig, LlmRequest
             from dsh.llm.messages import Message
             request = LlmRequest(
-                config=LlmCallConfig(provider="deepseek", model="deepseek-chat",
+                config=LlmCallConfig(provider="deepseek",
+                                     model=os.environ.get("DEEPSEEK_MODEL",
+                                                          "deepseek-chat"),
                                      max_tokens=600, temperature=0.8),
                 messages=[Message.user(prompt)])
             text = ""

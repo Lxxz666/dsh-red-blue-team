@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import tempfile
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -93,7 +94,9 @@ class LlmAttackAgent:
                 provider = "deepseek"
             self._register_tools(ctx)
             agent = await ctx.agents.create(options={"provider": provider,
-                                                     "model": "deepseek-chat"})
+                                                     "model": os.environ.get(
+                                                         "DEEPSEEK_MODEL",
+                                                         "deepseek-chat")})
             mission = self._mission_prompt()
             agent.followup(mission)
             try:

@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Optional
 
 from dsh.kernel import Context
@@ -28,6 +29,34 @@ from .storage import StorageService
 from .vectors.registry import VectorRegistry
 
 log = logging.getLogger("redteam.runtime")
+
+
+def _load_dotenv() -> None:
+    """加载项目根目录 .env（无第三方依赖；已存在的环境变量优先）。
+
+    支持 DEEPSEEK_API_KEY / DEEPSEEK_BASE_URL / DEEPSEEK_MODEL，
+    用于把 LLM 接缝指向火山方舟 Agent Plan 等 OpenAI 兼容端点。
+    """
+    dotenv_path = os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), ".env")
+    if not os.path.exists(dotenv_path):
+        return
+    try:
+        with open(dotenv_path, "r", encoding="utf-8") as fh:
+            for raw in fh:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key, value = key.strip(), value.strip().strip("\"'")
+                if key and key not in os.environ:
+                    os.environ[key] = value
+        log.debug("已加载项目 .env（%s）", dotenv_path)
+    except OSError:
+        pass
+
+
+_load_dotenv()
 
 
 class RedTeamRuntime:
