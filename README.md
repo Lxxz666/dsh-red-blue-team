@@ -1,76 +1,60 @@
 # 🔴🔵 dsh-red-blue-team · 智能红蓝对抗安全检测系统
 
-> 基于 [dsh-python](https://github.com/Lxxz666/DSH-wanter-python)（DeepSeek Harness Python 实现）二次开发的**红队/蓝队智能安全检测系统**：
+> **别问我"哪里可能有问题"——我直接攻击给你看，修好它，再攻击一遍证明修好了。**
+>
+> 基于 [dsh-python](https://github.com/Lxxz666/DSH-wanter-python) 二次开发的红队/蓝队智能安全检测系统：
 > **主 Agent 派发子 Agent 并行攻击你的业务系统 → 确定性判定漏洞 → 出攻击报告 → 自动修复 → 回归验证清零 → 用 wanter 势能地形学会"最有效的攻击"。**
 >
-> 一个命令跑完整闭环，一个文件夹、一个网址或一个 MCP 服务即可开测，开箱即用、零 API Key 依赖。
+> 一个命令跑完整闭环：一个文件夹、一个网址或一个 MCP 服务即可开测，**开箱即用、零 API Key 依赖**。
 
 ![CI](https://github.com/Lxxz666/dsh-red-blue-team/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![Tests](https://img.shields.io/badge/tests-357%20passed-brightgreen)
+![发现率](https://img.shields.io/badge/埋入漏洞发现率-100%25-brightgreen)
+![误报](https://img.shields.io/badge/修复后复扫-0%20命中-blue)
+![靶场](https://img.shields.io/badge/内置靶场-53%20漏洞-red)
+![场景](https://img.shields.io/badge/业务场景-12%20大-orange)
+![样本](https://img.shields.io/badge/攻击样本-71-yellow)
 ![License](https://img.shields.io/badge/license-MIT-green)
-
-**别的工具告诉你"哪里可能有问题"，dsh-red-blue-team 直接攻击给你看，然后修好它，再攻击一遍证明修好了。**
 
 ---
 
-## 💡 它能回答什么问题
+## ✨ 别的扫描器 vs 这个系统
 
-| 上线前的焦虑 | 本项目的答案 |
-|:--|:--|
-| "我的 AI 客服会被提示注入打穿吗？" | 54 类攻击向量自动打一遍，注入/提权/投毒**当场演示**（含多轮攻击链诱导） |
-| "低权限用户能越权操作吗？" | 按角色×业务场景矩阵攻击，IDOR/批量赋值/功能越权全覆盖 |
-| "我的业务逻辑（改价/叠加券/重复退款）安全吗？" | **12 大业务场景**专属攻击样本（WSTG-BUSL 方法论） |
-| "我的 Agent 挂了 MCP 工具，安全吗？" | 给 MCP 服务，**直接向工具注入恶意参数**打一遍 |
-| "代码里有没有硬编码密钥？依赖有没有已知 CVE？" | 给个文件夹，**代码级静态审计**（file:line 证据） |
-| "发现漏洞后怎么修？修没修好？" | 68 类修复模板（问题说明+代码级 before/after）→ 沙箱修复 → **回归清零** |
-| "每次扫描都要从头打一遍吗？" | wanter 自适应地形记住"这个目标最怕什么"，二次扫描更早命中 |
+| 你的焦虑 | 别的工具告诉你 | **dsh-red-blue-team 直接做给你看** |
+|:--|:--|:--|
+| "AI 客服会被提示注入打穿吗？" | "存在提示注入风险（置信度 0.73）" | 🎯 54 类攻击向量当场打一遍，注入/提权/投毒**演示给你看**（含多轮攻击链诱导） |
+| "低权限用户能越权吗？" | "建议检查 IDOR" | 🎯 按角色×业务场景矩阵真实攻击，IDOR/批量赋值/功能越权**当场判定** |
+| "改价/叠券/重复退款安全吗？" | "建议人工测试业务逻辑" | 🎯 **12 大业务场景**专属攻击样本（WSTG-BUSL 方法论），1 元买 299 元商品当场复现 |
+| "Agent 挂了 MCP 工具安全吗？" | "不确定" | 🎯 直接向 MCP 工具注入恶意参数打一遍 |
+| "代码里有硬编码密钥吗？" | "建议用 SAST" | 🎯 文件夹代码级审计，**file:line 级证据** + 依赖 CVE-lite 比对 |
+| "发现漏洞后怎么修？" | "自己看文档吧" | 🎯 **68 类修复模板**（问题说明+代码级 before/after）→ 沙箱自动修复 → 回归清零 |
+| "每次都要从头扫吗？" | "是" | 🎯 wanter 自适应地形记住"这个目标最怕什么"，**二次扫描更早命中** |
 
-## ⚡ 快速开始
+---
+
+## 🎬 一条命令跑完整闭环（真实输出）
 
 ```bash
-pip install -r requirements.txt
-
-# ① 一键演示完整闭环（起靶场 → 89 次攻击成功 → 89 修复 → 89 回归通过 → 复扫 0 命中）
 python -m redteam.cli demo
-
-# ② 给一个网址：动态攻击扫描（内置靶场 / 你自己的业务系统）
-python -m redteam.cli lab --port 8765 --guards ./lab_guards.yml   # 终端1
-python -m redteam.cli scan --config examples/scan_lab.yaml --fix  # 终端2：扫描+修复+回归+修复报告
-
-# ③ 给一个文件夹：代码级静态审计（免配置）
-python -m redteam.cli static <你的项目文件夹>
-
-# ④ 给一个 MCP 服务：工具面攻击（tools/call 注入恶意参数）
-python -m redteam.cli scan --config examples/scan_mcp.yaml
-
-# ⑤ Web 面板：网页发起扫描/看漏洞/跑修复（默认自动挂内置靶场）
-python -m redteam.cli web --port 8766
-
-# ⑥ 多目标批扫 / 定时扫描
-python -m redteam.cli batch --targets examples/targets.yml
-python -m redteam.cli schedule --config examples/scan_lab.yaml --every 24h --webhook <URL>
-
-# ⑦ 业务场景库 / 攻击样本库 / 自适应基准
-python -m redteam.cli scenarios list
-python -m redteam.cli samples list
-python -m redteam.cli bench --config examples/scan_lab.yaml
 ```
 
-安装后可用 `dsh-redteam` 命令代替 `python -m redteam.cli`。
+```
+① 靶场已启动（53 个埋入漏洞全部开启，含 12 大业务场景）: http://127.0.0.1:8765
+   业务场景识别：电商/零售, 教育/在线学习, 金融/支付/钱包, SaaS/多租户, 社交/社区,
+                 医疗/健康, 游戏/虚拟资产, 外卖/物流/出行, 招聘/HR, 内容/媒体/直播,
+                 会员/订阅/积分, 政务/公共服务
+   攻击计划：122 条样本（角色 × 12 场景）
+② 红队扫描：113 次攻击成功，发现 113 条漏洞（53/53 类埋入漏洞，发现率 100%）
+   漏洞分布： critical=86  high=21  medium=6
+③ 蓝队修复：修复方案 113 条 → 应用 113 条 → 回归通过 113 条
+④ 修复后复扫验收：复扫命中 0 条（修复前 113 条）
+   🎉 验收通过：修复后同一攻击重跑 0 命中，闭环完整。
+```
 
-## 📊 量化指标（CI 强制验收，可复现）
+**113 次攻击 → 113 条漏洞 → 113 次修复 → 113 次回归通过 → 复扫 0 命中。** 全流程约 10 秒。
 
-| 指标 | 结果 | 说明 |
-|:--|:--|:--|
-| 埋入漏洞发现率 | **53/53 = 100%** | 内置靶场 53 个埋入漏洞（验收线 ≥80%），`test_scan_e2e` 每次 CI 强制 |
-| 误报率（全加固靶场复扫） | **0 命中** | 修复完成的靶场复扫必须清零，否则 CI 失败 |
-| 修复闭环 | **89 命中 → 89 修复 → 89 回归通过 → 复扫 0 命中** | 蓝队自动修复+回归验证，同一攻击重跑必须清零 |
-| 测试规模 | **357 passed**（框架 224 + 红蓝队 133） | 判定/靶场/场景/静态/多Agent/MCP/攻击链/LLM自主Agent/Web面板/批扫/定时/回归全链路，GitHub Actions 双 Python 版本 |
-| 扫描确定性 | 两次扫描命中集合**完全一致** | 状态型样本串行通道+重置隔离，报告可复现审计 |
-| 自适应收益（wanter 地形） | 25% 预算下命中率 **+10.5%**，覆盖效率提速 **+9.0%** | bench 命令：随机基线 vs 地形序二次扫描对比 |
-| 检测面 | **71 条基础样本 × 54 个攻击类别** | D1 Web / D2 API / D3 LLM / D7 配置 + D19 业务场景 + MCP 工具面 |
-| 业务场景 | **12 大场景**（电商/金融/教育/SaaS/社交/医疗/游戏/外卖/招聘/直播/会员/政务） | 指纹自动识别，场景专属样本自动加载 |
+---
 
 ## 🎯 真实攻击示例（靶场实测证据）
 
@@ -106,12 +90,29 @@ POST /api/checkout {"cart_id": "C-1001", "amount": "1"}
 **示例 4 · 文件夹静态审计**（`file:line` 证据）
 
 ```text
-app.py:1   🔴 硬编码 API 密钥: API_KEY = "sk-live-9f8a7b6c..."
+app.py:1   🔴 硬编码 API 密钥: API_KEY = "«redacted:sk-…»..."
 app.py:4   🔴 shell=True 命令注入
 requirements.txt:1  🟠 django==3.2.20 命中 CVE-lite 已知漏洞区间
 .env       🔴 敏感文件被纳入项目
 → 修复报告给出: 问题说明 + 密钥轮换步骤 + 代码级 before/after
 ```
+
+---
+
+## 📊 量化指标（CI 强制验收，可复现）
+
+| 指标 | 结果 | 说明 |
+|:--|:--|:--|
+| 🐞 埋入漏洞发现率 | **53/53 = 100%** | 内置靶场 53 个埋入漏洞（验收线 ≥80%），`test_scan_e2e` 每次 CI 强制 |
+| 🛡️ 误报率（全加固靶场复扫） | **0 命中** | 修复完成的靶场复扫必须清零，否则 CI 失败 |
+| 🔧 修复闭环 | **113 命中 → 113 修复 → 113 回归通过 → 复扫 0 命中** | 蓝队自动修复+回归验证，同一攻击重跑必须清零 |
+| 🧪 测试规模 | **357 passed**（框架 224 + 红蓝队 133） | 全链路覆盖，GitHub Actions 双 Python 版本 |
+| 🎲 扫描确定性 | **两次扫描命中集合完全一致** | 状态型样本串行通道+重置隔离，报告可复现审计 |
+| 🧠 自适应收益（wanter 地形） | 25% 预算下命中率 **+10.5%**，覆盖效率 **+9.0%** | bench 命令：随机基线 vs 地形序二次扫描对比 |
+| 🗺️ 检测面 | **71 条基础样本 × 62 个攻击类别** | D1 Web / D2 API / D3 LLM / D7 配置 + D19 业务场景 + MCP 工具面 |
+| 🏪 业务场景 | **12 大场景**（电商/金融/教育/SaaS/社交/医疗/游戏/外卖/招聘/直播/会员/政务） | 指纹自动识别，场景专属样本自动加载 |
+
+---
 
 ## 🧠 架构：主 Agent + 子 Agent 并行攻击
 
@@ -134,17 +135,63 @@ BlueEngine（蓝队）：68 类修复模板 → 沙箱应用 → 回归清零 �
 Web 面板：dsh-redteam web（网页发起扫描/漏洞清单/报告/一键修复）
 ```
 
-- **确定性判定**：证据模式/敏感泄露/副作用探测/重定向/安全头缺失等硬信号优先，
-  弱信号只标记存疑——**绝不误报成功**（拒绝话术"删除订单需要人工审批"≠攻击成功，有测试保证）
-- **事件溯源**：主/子 Agent 派发与每次攻击的载荷、原始响应、判定依据全程落盘 JSONL，可回放审计
-- **自适应**：复用 dsh.wanter 势能地形——成功攻击刻蚀河道（下次优先），失败淤积抬高（自动避开），跨目标按业务域分区
-- **合规红线**：非本地目标必须声明书面授权否则拒绝扫描；蓝队只改沙箱，绝不直改生产
+- **🎯 确定性判定**：证据模式/敏感泄露/副作用探测/重定向/安全头缺失等硬信号优先，弱信号只标记存疑——**绝不误报成功**（拒绝话术"删除订单需要人工审批"≠攻击成功，有测试保证）
+- **📜 事件溯源**：主/子 Agent 派发与每次攻击的载荷、原始响应、判定依据全程落盘 JSONL，可回放审计
+- **🧠 自适应**：复用 dsh.wanter 势能地形——成功攻击刻蚀河道（下次优先），失败淤积抬高（自动避开），跨目标按业务域分区
+- **🔒 合规红线**：非本地目标必须声明书面授权否则拒绝扫描；蓝队只改沙箱，绝不直改生产
+
+---
+
+## ⚡ 快速开始
+
+```bash
+pip install -r requirements.txt
+
+# ① 一键演示完整闭环（起靶场 → 113 次攻击 → 113 修复 → 回归通过 → 复扫 0 命中）
+python -m redteam.cli demo
+
+# ② 给一个网址：动态攻击扫描（内置靶场 / 你自己的业务系统）
+python -m redteam.cli lab --port 8765 --guards ./lab_guards.yml   # 终端1
+python -m redteam.cli scan --config examples/scan_lab.yaml --fix  # 终端2：扫描+修复+回归+修复报告
+
+# ③ 给一个文件夹：代码级静态审计（免配置）
+python -m redteam.cli static <你的项目文件夹>
+
+# ④ 给一个 MCP 服务：工具面攻击（tools/call 注入恶意参数）
+python -m redteam.cli scan --config examples/scan_mcp.yaml
+
+# ⑤ Web 面板：网页发起扫描/看漏洞/跑修复（默认自动挂内置靶场）
+python -m redteam.cli web --port 8766
+
+# ⑥ 多目标批扫 / 定时扫描
+python -m redteam.cli batch --targets examples/targets.yml
+python -m redteam.cli schedule --config examples/scan_lab.yaml --every 24h --webhook <URL>
+
+# ⑦ 业务场景库 / 攻击样本库 / 自适应基准
+python -m redteam.cli scenarios list
+python -m redteam.cli samples list
+python -m redteam.cli bench --config examples/scan_lab.yaml
+```
+
+安装后可用 `dsh-redteam` 命令代替 `python -m redteam.cli`。
+
+---
 
 ## 🏪 内置靶场（53 个埋入漏洞）
 
 一个"故意埋雷"的弱防护电商客服 agent：LLM 注入/密钥泄露/工具滥用 × **12 大业务场景**
 （电商/金融/教育/SaaS/社交/医疗/游戏/外卖/招聘/直播/会员/政务）业务逻辑漏洞，
 全部由 `guards.yml` 驱动——**蓝队修复 = 收紧 guards → 回归证明清零**。
+
+| 检测面 | 漏洞数 | 攻击类型 |
+|:--|:--|:--|
+| D3 LLM/AI 层 | 10 | 提示注入 / 密钥泄露 / 过度自主 / 数据投毒 / 行为劫持 |
+| D1 Web 层 | 7 | SQLi / XSS / 路径穿越 / 命令注入 / SSTI / SSRF / 开放重定向 |
+| D2 API 层 | 3 | IDOR / 批量赋值 / 功能级越权 |
+| D6/D7 | 3 | PII 泄露 / 调试端点 / 安全头缺失 |
+| D19 业务逻辑 | 30 | 12 大场景全覆盖（改价/叠券/重复退款/成绩篡改/租户隔离…） |
+
+---
 
 ## 📁 目录
 
@@ -164,36 +211,35 @@ dsh-red-blue-team/
 
 ## 📚 文档
 
-[架构设计](docs/ARCHITECTURE.md) · [用户手册](docs/USER_GUIDE.md) ·
-[攻击分类目录](docs/ATTACK_CATALOG.md) · [12 大业务场景](docs/SCENARIOS.md) ·
-[合规声明](docs/COMPLIANCE.md)（**使用前必读**）
+[架构设计](docs/ARCHITECTURE.md) · [用户手册](docs/USER_GUIDE.md) · [攻击分类目录](docs/ATTACK_CATALOG.md) · [12 大业务场景](docs/SCENARIOS.md) · [合规声明](docs/COMPLIANCE.md)（**使用前必读**）
+
+---
+
+## 🗺️ 版本演进（Roadmap 全部完成 ✅）
+
+| 版本 | 交付 |
+|:--|:--|
+| V1 | 核心闭环：LLM/Web/API/配置检测面 + 确定性判定 + 靶场 + 蓝队回归 |
+| V2 | 12 大业务场景适配（指纹识别 + 场景样本 + 业务逻辑修复模板） |
+| V3 | 多 Agent 编排（主/侦察/静态/攻击子Agent 并行 + 事件溯源） |
+| V4 | 双模式输入：网址动态扫描 / 文件夹静态审计（CVE-lite 依赖比对） |
+| V5 | MCP 目标适配：dsh.mcp 直连工具面（工具滥用/越权/投毒样本） |
+| V6 | LLM 载荷变体生成（opt-in，DeepSeek 可用时增强攻击计划） |
+| V7 | 多轮攻击链编排 + V8 Web 面板 |
+| V8 | Web 面板：FastAPI + 原生 JS（扫描/漏洞/报告/一键修复） |
+| V9 | LLM 定向补打轮（分析未命中向量 → 针对性攻击链 → 第二轮） |
+| V10 | 定时扫描 + 多目标批扫 + 静态规则扩至 21 条 |
+| V11 | 子Agent 升级为完整 LLM agent loop（自主攻击决策者，次数/超时双上限） |
+| V12 | Webhook 报告推送（钉钉/企微/邮件网关） |
+
+**红队（多检测面×多场景×多Agent×LLM 自主）→ 蓝队（修复-回归-报告）→ 产品化（Web/批扫/定时/推送/CI）闭环全部落地。**
+
+---
 
 ## 🛡️ 合规声明
 
 本项目仅用于**安全研究、授权测试与教学**。对未授权系统的任何测试行为由使用者
 自行承担法律责任；系统内置授权闸门（非本地目标无书面授权声明即拒绝扫描）。
-
-## 🗺️ Roadmap
-
-- [x] V1 核心闭环：LLM/Web/API/配置检测面 + 确定性判定 + 靶场 + 蓝队回归
-- [x] V2 业务场景适配：12 大场景指纹识别 + 场景专属样本 + 业务逻辑漏洞修复模板
-- [x] V3 多 Agent 编排：主Agent/侦察/静态/攻击子Agent 并行 + 事件溯源审计
-- [x] V4 双模式输入：网址动态扫描 / 文件夹静态审计（CVE-lite 依赖比对）
-- [x] V5 MCP 目标适配：dsh.mcp 直连工具面，工具滥用/越权/投毒攻击样本（对话样本自动跳过）
-- [x] V6 LLM 载荷变体生成（opt-in，DeepSeek 可用时增强攻击计划，失败静默降级）
-- [x] V7 多轮攻击链编排：静态链模板（铺垫诱导）+ LLM 链生成（opt-in），全链入审计与报告
-- [x] V8 Web 面板：FastAPI + 原生 JS（扫描任务/漏洞清单/报告/蓝队修复，`dsh-redteam web` 一键起）
-- [x] CI 自动化：GitHub Actions 双 Python 版本全量测试 + 靶场验收 job
-- [x] V9 LLM 定向补打轮（opt-in）：分析首轮未命中向量 → LLM 生成针对性攻击链 → 第二轮补打
-- [x] V10 定时扫描 + 多目标批扫：`schedule`（周期扫描/报告留存/webhook 推送）、
-  `batch`（targets.yml 串行扫描 + 风险排序汇总）；静态规则扩展至 21 条（npm CVE-lite/JWT 弱密钥/明文 HTTP/Terraform/K8s/Java/Go/令牌文件）
-- [x] V12 报告推送：`scan`/`fix`/`schedule` 支持 `--webhook` POST JSON 摘要
-  （可接钉钉/企微/邮件网关）；`report --remediation` 查看完整修复报告
-- [x] V11 子Agent 升级为完整 LLM agent loop：`engine.llm_agent: true` 时，
-  LLM 作为自主攻击决策者（attack_vector/finalize_report 工具）在 dsh agent
-  loop 中循环攻击-观察-调整并提交攻击报告；无 LLM 优雅降级，次数/超时双重上限
-- [x] **Roadmap 全部完成**：红队（多检测面×多场景×多Agent×LLM 自主）→ 蓝队
-  （修复-回归-报告）→ 产品化（Web 面板/批扫/定时/推送/CI）闭环
 
 ## 📄 License
 
