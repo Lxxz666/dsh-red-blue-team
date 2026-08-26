@@ -40,6 +40,20 @@ log = logging.getLogger("dsh.agent")
 # 单个 turn 的最大工具步数（模型工具循环防线，超限强制终止并落盘）
 MAX_TURN_STEPS = 25
 
+# 探索型工具死循环收敛：模型执着反复调用只读探查工具（搜索/抓取/命令行）且
+# 始终不产出最终回复时，达到上限后向模型注入收敛提示，令其基于已有信息收尾，
+# 避免一路打满 MAX_TURN_STEPS 被强杀（报 step limit reached）。
+EXPLORE_TOOLS = frozenset({
+    "web_search", "web_fetch", "web-ddgs", "bash", "shell", "powershell",
+    "search", "fetch", "browser", "cmd", "terminal", "http_get", "curl",
+})
+MAX_EXPLORE_CALLS = 12
+CONVERGE_HINT = (
+    "【系统提示·资源限制】你已多次调用搜索/网络/命令行工具仍未找到确定结果。"
+    "请立即停止调用任何工具，基于你目前已知的信息如实、简洁地回答用户；"
+    "如果确实无法确认，就直接承认没查到，不要继续搜索或重试。"
+)
+
 
 class _TurnFailed(Exception):
     """turn 因错误结束的内部信号（由 _run_turn 捕获转为 error 原因）。"""
@@ -214,11 +228,17 @@ class AgentLoopService(Service):
         reason: Dict[str, Any] = {"kind": "completed"}
         step = 1
         retries = 0
+        agent._explore_calls = 0
         try:
             while True:
                 if agent._turn_signal.aborted:
                     reason = self._abort_reason(agent)
                     break
+                # 探索工具死循环收敛：累计达上限 → 注入收敛提示令模型收尾
+                if getattr(agent, "_explore_calls", 0) >= MAX_EXPLORE_CALLS:
+                    agent._explore_calls = 0  # 仅注入一次，模型下一步应收敛
+                    batch = [{"content": CONVERGE_HINT,
+                              "source": {"kind": "system"}}]
                 # first=True 仅指本 turn 的第一次尝试（重试不递增 step，故须排除 retries）
                 outcome = await self._run_step(agent, turn, step, batch,
                                                first=(step == 1 and retries == 0))
@@ -421,6 +441,8 @@ class AgentLoopService(Service):
                            {"turn": turn, "step": step,
                             "call_id": block.call_id, "name": block.name,
                             "arguments": block.arguments or "{}"})
+            if block.name in EXPLORE_TOOLS:
+                agent._explore_calls = getattr(agent, "_explore_calls", 0) + 1
             result = await self.ctx.tools.execute(
                 block.call_id, block.name, arguments, agent=agent,
                 signal=agent._turn_signal, scope=agent.ctx_name)
