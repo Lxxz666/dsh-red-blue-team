@@ -31,6 +31,11 @@ import logging
 import os
 from typing import Any, Dict, List, Optional
 
+try:
+    import tomllib  # Python 3.11+
+except ModuleNotFoundError:  # Python 3.10 fallback
+    import tomli as tomllib  # type: ignore
+
 from ..kernel import Service
 from .hooks import hooks_for, run_hook
 from ..tools.pipeline import (AskDecision, BlockDecision, DenyDecision)
@@ -102,7 +107,6 @@ def load_claude_hooks(path: str) -> List[Dict[str, Any]]:
 def load_codex_hooks(path: str) -> List[Dict[str, Any]]:
     """解析 Codex config.toml 的 [hooks] 段 → 归一化行。"""
     try:
-        import tomllib
         with open(path, "rb") as fh:
             data = tomllib.load(fh)
     except (OSError, tomllib.TOMLDecodeError):
