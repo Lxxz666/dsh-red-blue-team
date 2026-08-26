@@ -1,0 +1,24 @@
+# dsh-red-blue-team · Docker Compose 部署
+# 用法：cp .env.example .env（填写密钥与访问令牌）→ docker compose up -d
+services:
+  redteam:
+    build: .
+    image: dsh-red-blue-team:latest
+    container_name: dsh-red-blue-team
+    restart: unless-stopped
+    ports:
+      - "${REDTEAM_PORT:-8766}:8766"
+    env_file:
+      - .env
+    environment:
+      # 生产强制鉴权（面板 /api 全部要求 Bearer Token）
+      - REDTEAM_API_TOKEN=${REDTEAM_API_TOKEN:-}
+    volumes:
+      # 运行数据持久化（任务/审计/报告）——容器重建不丢
+      - ./web_runtime:/app/web_runtime
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8766/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s

@@ -1,0 +1,25 @@
+# Docker 构建排除
+venv/
+.venv/
+web_runtime/
+audit/
+reports/
+*.db
+lab_guards.yml
+sample_bank/
+.git/
+.gitignore
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.idea/
+.vscode/
+.env
+.env.*
+!.env.example
+README.md
+WANTER.md
+manuals/
+docs/
+examples/

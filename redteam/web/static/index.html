@@ -476,6 +476,22 @@ header { background: rgba(10,12,20,.55); backdrop-filter: blur(18px); -webkit-ba
 body { position: relative; }
 .left, .right, .toast-wrap, header, .theme-toggle { position: relative; z-index: 2; }
 
+/* ---------- 平台总览仪表盘 ---------- */
+.stat-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:14px; }
+.stat { background:var(--bg2); border:1px solid var(--border2); border-radius:12px; padding:12px 6px; text-align:center; transition:transform .15s; }
+.stat:hover { transform:translateY(-2px); border-color:var(--accent); }
+.stat-icon { font-size:20px; }
+.stat-val { font-size:22px; font-weight:800; margin-top:4px; color:var(--fg); }
+.stat-label { font-size:10.5px; color:var(--faint); margin-top:2px; }
+.charts { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+@media (max-width:760px){ .charts{grid-template-columns:1fr;} .stat-grid{grid-template-columns:repeat(2,1fr);} }
+.chart h3 { font-size:12px; color:var(--dim); margin-bottom:10px; letter-spacing:.5px; }
+.bar-row { display:flex; align-items:center; gap:8px; margin-bottom:7px; }
+.bar-label { width:64px; font-size:11px; color:var(--dim); text-align:right; flex-shrink:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.bar-track { flex:1; background:var(--bg2); border-radius:4px; height:14px; overflow:hidden; }
+.bar-fill { height:100%; border-radius:4px; transition:width .5s var(--ease); }
+.bar-val { width:26px; font-size:11px; color:var(--fg); font-weight:600; text-align:right; flex-shrink:0; }
+
 </style>
 </head>
 <body>
@@ -509,6 +525,15 @@ body { position: relative; }
 <main>
   <!-- ============ 左列：控制与任务 ============ -->
   <section class="left">
+
+    <div class="card" id="statsCard">
+      <h2>📊 平台总览</h2>
+      <div class="stat-grid" id="statGrid"></div>
+      <div class="charts">
+        <div class="chart"><h3>严重级别分布</h3><div id="sevChart"></div></div>
+        <div class="chart"><h3>攻击类别分布</h3><div id="catChart"></div></div>
+      </div>
+    </div>
 
     <div class="card">
       <h2>新建检测 · 网址目标</h2>
@@ -570,6 +595,7 @@ body { position: relative; }
           <h2 id="dName">—</h2>
           <span id="dStatus"></span>
           <button class="btn btn-ghost" id="btnReport">📄 攻击报告</button>
+          <button class="btn btn-ghost" id="btnReportHtml" title="打印友好 HTML，浏览器可另存 PDF">📤 HTML/PDF</button>
           <button class="btn btn-ghost" id="btnRemediation">🛠 修复报告</button>
           <button class="btn btn-ok" id="btnFix" style="display:none">🛡 蓝队修复</button>
         </div>
@@ -609,8 +635,20 @@ const state = {
 };
 
 /* ---------- 基础请求 ---------- */
+function apiToken() {
+  try { return localStorage.getItem("redteam_api_token") || ""; } catch (e) { return ""; }
+}
 async function api(path, opts = {}) {
-  const resp = await fetch(path, opts);
+  const headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
+  const t = apiToken();
+  if (t) headers["Authorization"] = "Bearer " + t;
+  const resp = await fetch(path, Object.assign({}, opts, { headers }));
+  if (resp.status === 401) {
+    const t2 = window.prompt("🔐 请输入面板访问令牌（REDTEAM_API_TOKEN）：", apiToken());
+    if (t2) { try { localStorage.setItem("redteam_api_token", t2); } catch (e) {}
+      location.reload(); }
+    throw new Error("未授权：需要访问令牌");
+  }
   if (!resp.ok) {
     let detail = resp.statusText;
     try { const j = await resp.json(); detail = j.detail || detail; } catch {}
@@ -918,6 +956,17 @@ async function loadReport() {
     `<div class="empty-hint">${esc(e.message)}</div>`; }
 }
 
+/* 导出打印友好 HTML 报告（Blob 打开，可另存 PDF） */
+async function openHtmlReport() {
+  const task = state.tasks.find((t) => t.task_id === state.selected);
+  if (!task || task.status !== "finished") return toast("任务尚未完成", "err");
+  try {
+    const html = await api(`/api/tasks/${task.task_id}/report.html`);
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    window.open(URL.createObjectURL(blob), "_blank");
+  } catch (e) { toast("导出失败：" + e.message, "err"); }
+}
+
 async function loadRemediation() {
   const task = state.tasks.find((t) => t.task_id === state.selected);
   if (!task) return;
@@ -995,11 +1044,45 @@ function updateTargetBadge(task) {
 }
 
 /* ---------- 初始化 ---------- */
+/* 平台总览仪表盘：统计卡片 + 严重级别/攻击类别条形图 */
+async function loadStats() {
+  try {
+    const s = await api("/api/stats");
+    const sev = s.severity || {};
+    const highRisk = (sev.critical || 0) + (sev.high || 0);
+    $("statGrid").innerHTML = [
+      { icon: "🗂️", val: s.total_tasks, label: "总任务" },
+      { icon: "✅", val: s.status.finished, label: "已完成" },
+      { icon: "🐞", val: s.findings_total, label: "漏洞总数" },
+      { icon: "🔴", val: highRisk, label: "高危(严重+高)" },
+    ].map(g => `<div class="stat"><div class="stat-icon">${g.icon}</div>`
+      + `<div class="stat-val">${g.val}</div><div class="stat-label">${g.label}</div></div>`).join("");
+    const sevMeta = [["critical", "严重", "#ff4d6d"], ["high", "高", "#ff9f43"],
+                     ["medium", "中", "#ffd166"], ["low", "低", "#22d3a5"],
+                     ["info", "信息", "#8b95ab"]];
+    const sevMax = Math.max(1, ...sevMeta.map(([k]) => sev[k] || 0));
+    $("sevChart").innerHTML = sevMeta.map(([k, label, color]) => {
+      const v = sev[k] || 0;
+      return `<div class="bar-row"><span class="bar-label">${label}</span>`
+        + `<div class="bar-track"><div class="bar-fill" style="width:${Math.round(v / sevMax * 100)}%;background:${color}"></div></div>`
+        + `<span class="bar-val">${v}</span></div>`;
+    }).join("");
+    const cats = s.categories || {};
+    const catMax = Math.max(1, ...Object.values(cats));
+    $("catChart").innerHTML = Object.entries(cats).map(([k, v]) =>
+      `<div class="bar-row"><span class="bar-label" title="${esc(k)}">${esc(k)}</span>`
+      + `<div class="bar-track"><div class="bar-fill" style="width:${Math.round(v / catMax * 100)}%;background:var(--accent)"></div></div>`
+      + `<span class="bar-val">${v}</span></div>`).join("")
+      || `<div class="empty-hint">暂无漏洞数据</div>`;
+  } catch (e) { /* 401 由 api 处理 */ }
+}
+
 async function init() {
   // ① 先绑定交互（不依赖任何配置，保证按钮始终可用）
   $("btnStart").addEventListener("click", startUrlTask);
   $("btnUpload").addEventListener("click", uploadProject);
   $("btnReport").addEventListener("click", loadReport);
+  $("btnReportHtml").addEventListener("click", openHtmlReport);
   $("btnRemediation").addEventListener("click", loadRemediation);
   $("btnFix").addEventListener("click", fixNow);
 
@@ -1029,8 +1112,9 @@ async function init() {
   }
   updateTargetBadge(null);
 
-  // ③ 任务列表 + 轮询
+  // ③ 任务列表 + 轮询 + 总览仪表盘
   await refreshTasks();
+  loadStats();
   loop();
 }
 init();

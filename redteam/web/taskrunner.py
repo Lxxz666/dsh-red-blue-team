@@ -60,7 +60,67 @@ class TaskRunner:
     # ---- 生命周期 ----
 
     def start(self) -> None:
+        self._restore_historical_tasks()
         self._worker = asyncio.get_running_loop().create_task(self._run_queue())
+
+    def _restore_historical_tasks(self) -> None:
+        """从报告目录恢复历史已完成任务（企业级：面板重启任务历史不丢）。
+
+        扫描 web_runtime/reports/report_*.json，将已完成任务恢复到内存，
+        使任务列表与「平台总览」仪表盘在重启后仍能看到历史成果。
+        """
+        import json
+        reports_dir = os.path.join(self.runtime_dir, "reports")
+        if not os.path.isdir(reports_dir):
+            return
+        for fname in sorted(os.listdir(reports_dir)):
+            if not fname.startswith("report_") or not fname.endswith(".json"):
+                continue
+            jpath = os.path.join(reports_dir, fname)
+            try:
+                with open(jpath, encoding="utf-8") as fh:
+                    rep = json.load(fh)
+            except Exception:
+                continue
+            scan_id = rep.get("report_id") or fname[:-5]
+            task_id = f"restored-{scan_id}"
+            if task_id in self.tasks:
+                continue
+            summary = rep.get("summary") or {}
+            findings = rep.get("findings") or []
+            mpath = jpath[:-5] + ".md"
+            if not os.path.exists(mpath):
+                mpath = ""
+            self.tasks[task_id] = {
+                "task_id": task_id, "name": rep.get("target") or scan_id,
+                "status": "finished", "target": rep.get("target") or "",
+                "target_url": "", "project_dir": "",
+                "llm_agent": False, "llm_explorer": False,
+                "llm_fix_plan": False, "blue_fix": False,
+                "created_at": time.time(),
+                "started_at": rep.get("scanned_at"),
+                "finished_at": rep.get("finished_at"),
+                "error": None, "scan_id": scan_id, "remediation": None,
+                "steps": [{"name": "restore", "status": "finished",
+                           "msg": f"历史任务 {scan_id}（已恢复）"}],
+                "logs": [], "log_file": None,
+                "result": {
+                    "scan_id": scan_id, "target": rep.get("target") or "",
+                    "total": summary.get("total_samples", 0),
+                    "success": summary.get("attack_success", 0),
+                    "suspicious": summary.get("suspicious", 0),
+                    "severity_counts": summary.get("severity_counts") or {},
+                    "findings": [{"finding_id": f.get("finding_id", ""),
+                                  "category": f.get("category", ""),
+                                  "severity": f.get("severity", ""),
+                                  "role": f.get("role", ""),
+                                  "sample_id": f.get("sample_id", ""),
+                                  "evidence": str(f.get("evidence", ""))[:200],
+                                  "fix_plan": ""} for f in findings],
+                    "report_path": mpath,
+                    "report_json_path": jpath,
+                },
+            }
 
     async def close(self) -> None:
         if self._worker is not None:

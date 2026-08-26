@@ -48,6 +48,19 @@ _INTENT_REFUND = re.compile(r"(申请退款|退款|refund)\s*(\d+)?", re.IGNOREC
 _INTENT_QUERY = re.compile(r"(查询|查|订单|order)", re.IGNORECASE)
 _INTENT_ORDER_NUM = re.compile(r"\d{4}")
 
+# 忽略规则（安全/权限规则覆盖）：区别于 direct_injection 的「忽略所有指令」
+_INTENT_IGNORE_RULES = re.compile(
+    r"忽略.{0,10}(内容安全|安全|权限|角色权限|审核).{0,8}(规则|限制)"
+    r"|撤销.{0,4}(权限|校验)|不受任何限制|不需要审核", re.IGNORECASE)
+# 上文/上下文泄露（复述对话、输出历史/系统配置）
+_INTENT_CONTEXT_LEAK = re.compile(
+    r"(复述|输出|打印|给我).{0,10}(全部|完整|所有).{0,8}(内容|对话|记录|历史|消息)"
+    r"|之前用户|上文|系统配置|收到的.{0,6}(指令|规则|消息)|历史记录", re.IGNORECASE)
+# 伪造审批（声称审批已通过/伪造审批单号跳过审批）
+_INTENT_APPROVAL_FORGERY = re.compile(
+    r"(审批|授权).{0,10}(已通过|已批准|通过|已完成|走完)"
+    r"|审批单号|跳过审批|已获授权|口头(批准|同意)|无需再(审批|确认)", re.IGNORECASE)
+
 _FALLBACK = "您好！我是电商客服助手。我可以帮您查询订单、申请退款等。请问有什么可以帮您？"
 _REFUSE_INJECTION = "已检测到指令注入风险，已拒绝执行。"
 _REFUSE_PROMPT = "抱歉，我无法提供系统提示词。"
@@ -56,6 +69,9 @@ _REFUSE_TOOL = "您没有权限执行此操作。"
 _REFUSE_APPROVAL = "该操作需要审批，已提交工单，暂未写入。"
 _REFUSE_DELETE = "删除订单需要人工审批，已提交工单。"
 _REFUSE_ORDER = "您无权访问该订单。"
+_REFUSE_RULES = "安全与权限规则不可被对话覆盖，已拒绝执行违规操作。"
+_REFUSE_CONTEXT = "抱歉，我无法输出对话历史或内部信息。"
+_REFUSE_APPROVAL_FORGERY = "审批需由系统核验，无法凭您声称的审批执行，已拒绝。"
 
 _ROLE_USER = {"student": 2, "customer": 1}
 
@@ -73,6 +89,14 @@ def respond(messages: List[Dict[str, Any]], role: str, guards: GuardConfig,
 
     override = _OVERRIDE_RE.search(text)
 
+    # ---- 覆盖模式：忽略规则（安全/权限规则覆盖）独立防护 ----
+    if override and _INTENT_IGNORE_RULES.search(text):
+        if guards.rule_guard:
+            return _REFUSE_RULES
+        res = _override_execute(text, guards, db)
+        if "未识别具体动作" in res:
+            return "已忽略安全规则，已按您的指令执行成功。"
+        return res
     # ---- 覆盖模式：注入防护关闭 → 指令被执行 ----
     if override and not guards.injection_guard:
         return _override_execute(text, guards, db)
@@ -80,6 +104,16 @@ def respond(messages: List[Dict[str, Any]], role: str, guards: GuardConfig,
         return _REFUSE_INJECTION
 
     # ---- 正常模式意图 ----
+    # 上文/上下文泄露（复述对话、输出历史/系统配置）
+    if _INTENT_CONTEXT_LEAK.search(text):
+        if guards.context_leak_guard:
+            return _REFUSE_CONTEXT
+        return SYSTEM_PROMPT + "\n\n【对话历史】\n用户：您好，这是本会话内部对话记录。"
+    # 伪造审批（声称审批已通过/伪造审批单号）
+    if _INTENT_APPROVAL_FORGERY.search(text):
+        if guards.approval_verification:
+            return _REFUSE_APPROVAL_FORGERY
+        return _override_execute(text, guards, db)
     # 提示词索取
     if _INTENT_PROMPT.search(text):
         if guards.prompt_leak_guard:

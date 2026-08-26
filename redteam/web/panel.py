@@ -17,7 +17,7 @@ import time
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from .._env import load_dotenv
 from ..config import ScanConfig
@@ -50,12 +50,62 @@ def create_app(cfg: ScanConfig, runtime_dir: str,
     app = FastAPI(title="dsh-red-blue-team 面板", lifespan=lifespan)
     app.state.runner = runner
 
+    # ---- 企业级鉴权：设置 REDTEAM_API_TOKEN 后强制 Bearer Token ----
+    # 未设置时（开发/内网）放行；生产部署必须设置，避免面板裸奔。
+    _api_token = os.environ.get("REDTEAM_API_TOKEN", "").strip()
+
+    @app.middleware("http")
+    async def require_token(request: Request, call_next):
+        if _api_token and request.url.path.startswith("/api/"):
+            auth = request.headers.get("Authorization", "")
+            if (auth != f"Bearer {_api_token}"
+                    and request.headers.get("X-API-Token") != _api_token):
+                return JSONResponse(
+                    {"detail": "unauthorized: 缺少或错误的访问令牌（REDTEAM_API_TOKEN）"},
+                    status_code=401)
+        return await call_next(request)
+
     @app.get("/", response_class=HTMLResponse)
     async def index():
         if os.path.exists(_INDEX_HTML):
             with open(_INDEX_HTML, encoding="utf-8") as fh:
                 return fh.read()
         return "<h1>dsh-red-blue-team</h1><p>static/index.html 缺失</p>"
+
+    @app.get("/api/stats")
+    async def stats():
+        """仪表盘总览：聚合所有任务的漏洞/攻击/任务统计。"""
+        from collections import Counter
+        tasks = runner.tasks
+        sev: Counter = Counter()
+        cats: Counter = Counter()
+        status = Counter(t.get("status", "?") for t in tasks.values())
+        findings_n = attack_total = attack_success = attack_suspicious = 0
+        for t in tasks.values():
+            r = t.get("result")
+            if not r:
+                continue
+            sc = r.get("severity_counts") or {}
+            for k, v in sc.items():
+                sev[k] += v
+            for f in r.get("findings", []):
+                cats[f.get("category", "?")] += 1
+            findings_n += len(r.get("findings", []))
+            attack_total += int(r.get("total", 0))
+            attack_success += int(r.get("success", 0))
+            attack_suspicious += int(r.get("suspicious", 0))
+        order = ["critical", "high", "medium", "low", "info"]
+        return {
+            "total_tasks": len(tasks),
+            "status": {"running": status.get("running", 0),
+                       "finished": status.get("finished", 0),
+                       "failed": status.get("failed", 0)},
+            "findings_total": findings_n,
+            "severity": {k: sev.get(k, 0) for k in order},
+            "categories": dict(cats.most_common(10)),
+            "attack": {"total": attack_total, "success": attack_success,
+                       "suspicious": attack_suspicious},
+        }
 
     @app.get("/api/config")
     async def config():
@@ -169,6 +219,21 @@ def create_app(cfg: ScanConfig, runtime_dir: str,
             raise HTTPException(status_code=404, detail="报告文件不存在")
         with open(path, encoding="utf-8") as fh:
             return PlainTextResponse(fh.read(), media_type="text/markdown")
+
+    @app.get("/api/tasks/{task_id}/report.html")
+    async def task_report_html(task_id: str):
+        """HTML 版报告：打印友好单页，浏览器「打印→另存 PDF」可得专业 PDF。"""
+        task = runner.tasks.get(task_id)
+        if task is None or not task.get("result"):
+            raise HTTPException(status_code=404, detail="报告尚未生成")
+        path = task["result"].get("report_path")
+        if not path or not os.path.exists(path):
+            raise HTTPException(status_code=404, detail="报告文件不存在")
+        from ..reporter.html import render_report_html
+        with open(path, encoding="utf-8") as fh:
+            md = fh.read()
+        title = f"安全检测报告 · {task.get('name') or task_id}"
+        return HTMLResponse(render_report_html(md, title=title))
 
     @app.post("/api/tasks/{task_id}/fix")
     async def task_fix(task_id: str):

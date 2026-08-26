@@ -31,6 +31,9 @@ class GuardConfig:
     tool_role_check: bool = False
     excessive_agency_approval: bool = False
     memory_write_approval: bool = False
+    rule_guard: bool = False             # 忽略规则/安全·权限规则覆盖防护
+    context_leak_guard: bool = False     # 上文/上下文泄露防护
+    approval_verification: bool = False  # 伪造审批防护
     order_scope_check: bool = False
     sensitive_data_mask: bool = False
     # Web/API 层防护（D1/D2/D7）
@@ -88,7 +91,8 @@ DEFAULT_GUARDS = GuardConfig()
 HARDENED_GUARDS = GuardConfig(
     injection_guard=True, prompt_leak_guard=True, secret_leak_guard=True,
     tool_role_check=True, excessive_agency_approval=True,
-    memory_write_approval=True, order_scope_check=True,
+    memory_write_approval=True, rule_guard=True, context_leak_guard=True,
+    approval_verification=True, order_scope_check=True,
     sensitive_data_mask=True, sqli_filter=True, xss_encode=True,
     path_traversal_check=True, command_injection_check=True, ssti_check=True,
     ssrf_check=True, redirect_check=True, mass_assignment_filter=True,
