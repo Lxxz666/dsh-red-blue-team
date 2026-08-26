@@ -37,6 +37,9 @@ from .agent import Agent
 
 log = logging.getLogger("dsh.agent")
 
+# 单个 turn 的最大工具步数（模型工具循环防线，超限强制终止并落盘）
+MAX_TURN_STEPS = 25
+
 
 class _TurnFailed(Exception):
     """turn 因错误结束的内部信号（由 _run_turn 捕获转为 error 原因）。"""
@@ -142,7 +145,10 @@ class AgentLoopService(Service):
         return agent
 
     def _start_driver(self, agent: Agent) -> None:
-        task = asyncio.get_running_loop().create_task(self._drive(agent))
+        # 锚定宿主循环创建 driver：handler 可能跑在 TestClient/portal 等后台线程
+        # 循环，那里创建的 task 会被请求级作用域取消、Event 跨循环也失效。
+        loop = getattr(self.ctx, "loop", None) or asyncio.get_running_loop()
+        task = loop.create_task(self._drive(agent))
         agent._driver_task = task
         self._drivers[agent.id] = task
 
@@ -177,6 +183,13 @@ class AgentLoopService(Service):
                         if batch is None:
                             break
                         await self._run_turn(agent, batch)
+                        # 持久化 checkpoint：Web 服务器模式由 driver 驱动、
+                        # 无显式 flush —— 事件只进内存缓冲永不写盘。
+                        # 在 turn 完全结束（事件广播完毕）后落盘，保证对话真实持久化。
+                        try:
+                            await self.ctx.sessions.flush(agent.session)
+                        except Exception:
+                            log.exception("flush session %s failed", agent.id)
                 finally:
                     if not agent._disposed.is_set():
                         agent._set_status("idle")
@@ -226,6 +239,18 @@ class AgentLoopService(Service):
                     reason = self._abort_reason(agent)
                     break
                 step += 1
+                # 工具循环防线：模型可能无限调工具（无最终回复），
+                # 超限强制终止 turn，保证 turn/end → flush 落盘（防事件堆积不落盘）
+                if step > MAX_TURN_STEPS:
+                    reason = {"kind": "error",
+                              "error": {"message":
+                                        f"step limit reached ({MAX_TURN_STEPS})",
+                                        "code": "STEP_LIMIT"}}
+                    self.emit_agent_event("agent/error",
+                                          {"agent": agent, "turn": turn,
+                                           "step": step,
+                                           "error": reason["error"]})
+                    break
                 batch = agent.inbox.claim_next_step()
                 if outcome == "stop":
                     # 自然停止 → 终态检查点（监听者可 steer 出下一步）
@@ -254,6 +279,8 @@ class AgentLoopService(Service):
         # turn 收尾即清除取消语义：cause 不得跨 turn 泄漏到后续轮次
         agent._cancel_cause = None
         session.append("turn/end", {"turn": turn, "reason": reason})
+        # 注意：持久化 flush 不放这里 —— turn 关键路径 await 事件广播会与
+        # 异步 session/event 监听器死锁；改由 driver 循环在 turn 结束后落盘。
 
     def _abort_reason(self, agent: Agent) -> Dict[str, Any]:
         cause = agent._cancel_cause or {"kind": "user"}
@@ -445,8 +472,17 @@ class AgentLoopService(Service):
                         and "deepseek" in providers
                         else ("mock" if "mock" in providers else providers[0]))
         if not model:
-            model = "mock" if provider == "mock" else "deepseek-chat"
+            if provider == "mock":
+                model = "mock"
+            else:
+                # 尊重适配器默认模型（DeepSeekAdapter 读 DEEPSEEK_MODEL，
+                # 可指向方舟 dpv4flash 等自定义端点模型），而不是硬编码
+                adapter = self.ctx.llm.get_adapter(provider)
+                model = (getattr(adapter, "default_model", None)
+                         or "deepseek-chat")
         # `is not None` 判断（`or` 会把合法的 0 值如 temperature=0 当未设置）
+        # 红蓝队增强：合并 options.extra 与 defaults.extra，透传给适配器
+        # （如 tool_choice=required 强制工具调用、thinking 开关等）
         extra = dict(agent.options.get("extra") or {})
         extra.update(defaults.get("extra") or {})
         return LlmCallConfig(

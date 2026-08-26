@@ -103,13 +103,6 @@ def load_codex_hooks(path: str) -> List[Dict[str, Any]]:
     """解析 Codex config.toml 的 [hooks] 段 → 归一化行。"""
     try:
         import tomllib
-    except ModuleNotFoundError:  # Python 3.10：回退 tomli（不可用则跳过 TOML 解析）
-        try:
-            import tomli as tomllib
-        except ModuleNotFoundError:
-            log.warning("tomllib/tomli 不可用，跳过 Codex TOML hooks 解析: %s", path)
-            return []
-    try:
         with open(path, "rb") as fh:
             data = tomllib.load(fh)
     except (OSError, tomllib.TOMLDecodeError):

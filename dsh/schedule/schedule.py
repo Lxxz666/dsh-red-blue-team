@@ -66,6 +66,26 @@ class ScheduleService(Service):
         if (interval_seconds is None) == (schedule is None):
             raise ValueError(
                 "schedule entry needs exactly one of interval_seconds or schedule")
+        if (interval_seconds is not None
+                and interval_seconds < 1.0):
+            raise ValueError(
+                f"interval_seconds must be >= 1.0, got {interval_seconds}")
+        # 去重：相同 prompt + interval/cron 复用已有条目，防止模型/循环重复注册
+        # 无限累积（曾出现 storage 里 223 条同义条目淹会话的污染事故）。
+        for entry_id, existing in self._entries.items():
+            same_prompt = existing.get("prompt") == prompt
+            same_kind = (("interval_seconds" in existing)
+                         is (interval_seconds is not None))
+            if not (same_prompt and same_kind):
+                continue
+            if "interval_seconds" in existing:
+                same_value = (interval_seconds is not None
+                              and existing["interval_seconds"] == interval_seconds)
+            else:
+                same_value = (schedule is not None
+                              and existing.get("schedule") == schedule)
+            if same_value:
+                return entry_id
         entry_id = new_job_id()
         entry: Dict[str, Any] = {"id": entry_id, "prompt": prompt,
                                  "last_fired": time.time()}

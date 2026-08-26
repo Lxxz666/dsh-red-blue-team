@@ -41,6 +41,7 @@ EVENT_CATALOG: Dict[str, str] = {
     "tool/result": "工具调用的模型可见结果（error/meta 可选）。",
     "todo/write": "todo 列表全量快照（最新写入胜出，仅日志不进历史）。",
     "request/header": "下一次请求的完整信封（config+system prompt+tools），仅变化时全量快照。",
+    "request/context": "下一次请求的路由容量元数据（provider/model/context_window），仅变化时快照。",
     "session/end-seed": "构造器种子结束标记（firstLiveSeq 的持久化投影）。",
     "compaction/summary": "上下文压缩摘要（surface replace 事件，投影为 user 消息）。",
 }

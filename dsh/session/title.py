@@ -34,7 +34,13 @@ class SessionTitleService(Service):
         self._provider = provider
 
     def title_for(self, session: Any, messages: Optional[List[Any]] = None) -> str:
-        """计算标题：provider → 首条用户消息截断 → 会话 id 前缀。"""
+        """计算标题：provider → 首条用户消息截断 → 会话 id 前缀。
+
+        设置 ``auto_title=False`` 时直接返回会话 id 前缀（关闭自动标题）。
+        """
+        if self.ctx.has("settings") and \
+                self.ctx.settings.get("auto_title", True) is False:
+            return session.id[:16]
         if messages is None:
             messages = session.derive_messages()
         if self._provider is not None:

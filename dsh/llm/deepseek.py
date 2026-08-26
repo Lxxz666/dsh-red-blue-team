@@ -2,7 +2,11 @@
 dsh.llm.deepseek —— DeepSeek 适配器（OpenAI 兼容 chat/completions，httpx 实现）。
 
 凭据来源（与 TS 版一致）: 环境变量 ``DEEPSEEK_API_KEY``（必需）、
-``DEEPSEEK_BASE_URL``（可选，默认 https://api.deepseek.com）。
+``DEEPSEEK_BASE_URL``（可选，默认 https://api.deepseek.com）、
+``DEEPSEEK_MODEL``（可选，默认 deepseek-chat）、
+``DEEPSEEK_DISABLE_THINKING``（可选，1 时向 payload 注入
+``thinking: {"type": "disabled"}``，适配火山方舟 dpv4flash 等推理模型——
+流式 content 空、内容全在 reasoning_content 的问题，禁用思考后 content 直出）。
 
 流式: SSE（text/event-stream），逐行解析 ``data: {...}``，``data: [DONE]`` 收尾；
 非 2xx → LlmFailure（code 取自响应），超时 → LlmTimeoutError。
@@ -36,18 +40,27 @@ class DeepSeekAdapter(LlmAdapter):
                  base_url: Optional[str] = None,
                  model: Optional[str] = None,
                  timeout: float = 300.0,
-                 client: Optional[httpx.AsyncClient] = None) -> None:
+                 client: Optional[httpx.AsyncClient] = None,
+                 disable_thinking: Optional[bool] = None) -> None:
         """
         :param api_key: 密钥（默认读 DEEPSEEK_API_KEY）。
         :param base_url: API 基址（默认 DEEPSEEK_BASE_URL 或官方地址）。
-        :param model: 默认模型（请求配置可覆盖）。
+        :param model: 默认模型（默认 DEEPSEEK_MODEL 或 deepseek-chat）。
         :param timeout: 单次请求超时秒数。
         :param client: 外部注入的 httpx 客户端（测试用）。
+        :param disable_thinking: 注入 ``thinking: {"type": "disabled"}``
+            （默认读 DEEPSEEK_DISABLE_THINKING=1；火山方舟 dpv4flash 等
+            推理模型 content 直出的关键开关）。
         """
         self.api_key = api_key or os.environ.get("DEEPSEEK_API_KEY", "")
         self.base_url = (base_url or os.environ.get("DEEPSEEK_BASE_URL")
                          or DEFAULT_BASE_URL).rstrip("/")
-        self.default_model = model
+        self.default_model = (model or os.environ.get("DEEPSEEK_MODEL")
+                              or "deepseek-chat")
+        if disable_thinking is None:
+            disable_thinking = os.environ.get(
+                "DEEPSEEK_DISABLE_THINKING", "") in ("1", "true", "True", "yes")
+        self.disable_thinking = disable_thinking
         self.timeout = timeout
         self._client = client
         self._owns_client = client is None
@@ -67,7 +80,7 @@ class DeepSeekAdapter(LlmAdapter):
 
     def _payload(self, request: LlmRequest) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
-            "model": request.config.model or self.default_model or "deepseek-chat",
+            "model": request.config.model or self.default_model,
             "messages": [],
             "stream": True,
         }
@@ -76,18 +89,18 @@ class DeepSeekAdapter(LlmAdapter):
         payload["messages"].extend(messages_to_openai(request.messages))
         if request.tools:
             payload["tools"] = request.tool_schemas()
-            # 可选强制工具调用（tool_choice）：经 config.extra 传入（默认 None 不设置）。
-            tc = request.config.extra.get("tool_choice")
+            # 红蓝队增强：可选强制工具调用（tool_choice）经 config.extra 传入
+            # （如 redteam 强制 tool_choice=required），默认 None 不设置。
+            tc = (request.config.extra or {}).get("tool_choice")
             if tc:
                 payload["tool_choice"] = tc
         if request.config.max_tokens:
             payload["max_tokens"] = request.config.max_tokens
         if request.config.temperature is not None:
             payload["temperature"] = request.config.temperature
-        # 推理模型开关：火山方舟 deepseek-v4-flash 等默认只输出 reasoning_content
-        # （content 为空，agent loop 拿不到文本）。设 DEEPSEEK_DISABLE_THINKING=1
-        # 时附加 thinking disabled，让模型直接输出 content（agent 工具循环更连贯）。
-        if os.environ.get("DEEPSEEK_DISABLE_THINKING"):
+        # 推理模型（火山方舟 dpv4flash / glm 等）：流式 content 空，内容全在
+        # reasoning_content；禁用思考后 content 直出（详见 README「火山方舟接入」）
+        if self.disable_thinking:
             payload["thinking"] = {"type": "disabled"}
         return payload
 

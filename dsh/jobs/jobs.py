@@ -83,7 +83,7 @@ class JobsService(Service):
             try:
                 while True:
                     line = await asyncio.wait_for(job.process.stdout.readline(),
-                                                  timeout=self.timeout)
+                                                  timeout=job.timeout)
                     if not line:
                         break
                     job.output_chunks.append(line.decode("utf-8", "replace"))

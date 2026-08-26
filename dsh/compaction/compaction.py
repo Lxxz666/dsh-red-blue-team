@@ -118,11 +118,16 @@ class CompactionPolicyPlugin(Service):
         return cleanup
 
     async def _on_pre_step(self, payload: Dict[str, Any], next):
-        """压力检测：超阈值则压缩后委派。"""
+        """压力检测：超阈值则压缩后委派。阈值可被设置 ``compaction_threshold`` 覆盖。"""
         agent = payload.get("agent")
         if agent is not None:
+            threshold = self.ctx.compaction.threshold_tokens
+            if self.ctx.has("settings"):
+                override = self.ctx.settings.get("compaction_threshold")
+                if isinstance(override, (int, float)) and override > 0:
+                    threshold = int(override)
             messages = agent.session.derive_messages()
-            if self._estimate(messages) > self.ctx.compaction.threshold_tokens:
+            if self._estimate(messages) > threshold:
                 await self.ctx.compaction.compact(agent)
         return await next()
 

@@ -256,9 +256,241 @@
   .kv { font-size:12px; color:var(--dim); }
   .kv b { color:var(--fg); font-weight:600; }
   .row2 { display:flex; gap:8px; flex-wrap:wrap; }
+
+
+
+/* ===== dsh-python 沉浸式融合：三 accent + 玻璃拟态 ===== */
+:root {
+  --accent:#22D3EE; --accent2:#8B5CF6; --accent3:#EC4899;
+  --accent-ink:#67E8F9;
+  --glass: rgba(255,255,255,.045);
+  --glass-strong: rgba(255,255,255,.07);
+  --glass-border: rgba(255,255,255,.09);
+  --shadow-md: 0 12px 40px rgba(0,0,0,.4);
+  --ease: cubic-bezier(.22,1,.36,1);
+  --mx:50%; --my:50%;
+}
+/* 工作台玻璃卡片 + 浅色主题变量 */
+[data-theme="light"] {
+  --bg:#F4F7FB; --bg2:#E9EFF8; --panel:#ffffff; --panel2:#F0F4FA;
+  --border:#DCE4F0; --border2:#C7D2E4;
+  --fg:#1A2333; --dim:#5A6b85; --faint:#8A97AD;
+  --accent:#0E9EC7; --accent2:#6D4ED6; --accent3:#D63B7A;
+  --purple:#7C5CBF;
+}
+
+.aurora { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+.aurora::before {
+  content: ""; position: absolute; inset: 0;
+  background:
+    linear-gradient(115deg, rgba(34,211,238,.10) 0%, transparent 40%),
+    linear-gradient(245deg, rgba(139,92,246,.10) 0%, transparent 45%);
+  mix-blend-mode: screen;
+}
+.aurora-blob { position: absolute; border-radius: 50%; filter: blur(48px); will-change: transform; }
+.blob-1 {
+  width: 44vw; height: 44vw; top: -14vw; left: -10vw;
+  background: radial-gradient(circle, rgba(34, 211, 238, .7), transparent 68%);
+  animation: driftA 18s ease-in-out infinite alternate;
+}
+.blob-2 {
+  width: 48vw; height: 48vw; bottom: -18vw; right: -12vw;
+  background: radial-gradient(circle, rgba(139, 92, 246, .62), transparent 68%);
+  animation: driftB 22s ease-in-out infinite alternate;
+}
+.blob-3 {
+  width: 32vw; height: 32vw; top: 28%; left: 52%;
+  background: radial-gradient(circle, rgba(236, 72, 153, .45), transparent 68%);
+  animation: driftC 26s ease-in-out infinite alternate;
+}
+.blob-4 {
+  width: 26vw; height: 26vw; top: 8%; right: 20%;
+  background: radial-gradient(circle, rgba(52, 211, 153, .4), transparent 68%);
+  animation: driftD 20s ease-in-out infinite alternate;
+}
+@keyframes driftA { from { transform: translate(0,0) scale(1); } to { transform: translate(9vw, 7vh) scale(1.2); } }
+@keyframes driftB { from { transform: translate(0,0) scale(1.15); } to { transform: translate(-8vw, -6vh) scale(1); } }
+@keyframes driftC { from { transform: translate(0,0); } to { transform: translate(-12vw, 9vh); } }
+@keyframes driftD { from { transform: translate(0,0) scale(1); } to { transform: translate(6vw, -8vh) scale(1.25); } }
+
+/* 斜向流动光带（Raycast 式） */
+.aurora-beam {
+  position: absolute; inset: -20%; opacity: .9;
+  background:
+    repeating-linear-gradient(115deg,
+      transparent 0 90px,
+      rgba(34, 211, 238, .11) 90px 93px,
+      transparent 93px 180px,
+      rgba(139, 92, 246, .1) 180px 183px,
+      transparent 183px 270px);
+  animation: beamShift 28s linear infinite;
+  mix-blend-mode: screen;
+}
+@keyframes beamShift { from { transform: translateX(-10%); } to { transform: translateX(35%); } }
+
+/* 工程网格 */
+.aurora-grid {
+  position: absolute; inset: 0; opacity: .6;
+  background:
+    linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(70% 70% at 50% 40%, #000 30%, transparent 100%);
+  -webkit-mask-image: radial-gradient(70% 70% at 50% 40%, #000 30%, transparent 100%);
+}
+[data-theme="light"] .aurora-grid {
+  background:
+    linear-gradient(rgba(20,40,90,.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(20,40,90,.04) 1px, transparent 1px);
+}
+
+.aurora, .aurora-blob, .aurora-beam { opacity: var(--aurora-strength, .7); }
+
+/* ===== 粒子系统 ===== */
+#particles {
+  position: fixed; inset: 0; z-index: 2; pointer-events: none;
+  opacity: var(--aurora-strength, .7);
+}
+
+/* ===== 全局点击涟漪 ===== */
+.ripple {
+  position: fixed; z-index: 999; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(circle, rgba(34, 211, 238, .38) 0%, rgba(139, 92, 246, .18) 45%, transparent 70%);
+  transform: scale(0); animation: rippleAnim .62s var(--ease) forwards;
+}
+@keyframes rippleAnim { 60% { opacity: .8; } to { transform: scale(1); opacity: 0; } }
+
+/* ===== 背景视差：极光随鼠标移动 ===== */
+.aurora {
+  transform: translate(var(--parallax-x, 0), var(--parallax-y, 0)) scale(1.05);
+  transition: transform .12s linear;
+}
+.aurora-multi {
+  position: absolute; inset: -30%;
+  background: linear-gradient(120deg,
+    rgba(59, 130, 246, .16) 0%,
+    rgba(139, 92, 246, .14) 30%,
+    rgba(236, 72, 153, .10) 55%,
+    rgba(59, 130, 246, .12) 80%,
+    rgba(139, 92, 246, .16) 100%);
+  background-size: 220% 220%;
+  filter: blur(70px);
+  animation: multiFlow 26s ease-in-out infinite;
+  mix-blend-mode: screen;
+}
+@keyframes multiFlow {
+  0%, 100% { background-position: 0% 50%; transform: rotate(0deg) scale(1); }
+  50% { background-position: 100% 50%; transform: rotate(4deg) scale(1.06); }
+}
+
+/* ---- 空状态超大排版（Linear/Vercel 式） ---- */
+.empty h2 {
+  font-size: 34px; font-weight: 800; letter-spacing: -.5px;
+  background: linear-gradient(90deg, var(--ink), var(--accent-ink) 60%, var(--accent-2));
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  margin: 18px 0 6px;
+  animation: titleBreath 3.2s ease-in-out infinite;
+}
+@keyframes titleBreath {
+  0%, 100% { filter: drop-shadow(0 0 2px rgba(34,211,238,0)); }
+  50% { filter: drop-shadow(0 0 12px rgba(34,211,238,.28)); }
+}
+.cursor-glow {
+  position: fixed; inset: 0; z-index: 5; pointer-events: none;
+  background: radial-gradient(520px circle at var(--mx) var(--my),
+    rgba(34, 211, 238, .05), transparent 65%);
+}
+[data-theme="light"] .cursor-glow {
+  background: radial-gradient(520px circle at var(--mx) var(--my),
+    rgba(8, 145, 178, .05), transparent 65%);
+}
+.pet-whale {
+  position: fixed; right: 34px; bottom: 158px; z-index: 55;
+  width: 132px; cursor: pointer; user-select: none;
+  filter: drop-shadow(0 8px 20px rgba(43,77,240,.38));
+  transition: transform .25s var(--ease);
+}
+.pet-whale:hover { transform: translateY(-3px) scale(1.04); }
+.whale-svg { width: 100%; height: auto; display: block; overflow: visible; }
+.whale-wrap { animation: whaleBob 3.4s ease-in-out infinite; transform-origin: 50% 88%; }
+@keyframes whaleBob {
+  0%, 100% { transform: translateY(0) rotate(-1.4deg); }
+  50% { transform: translateY(-6px) rotate(1.4deg); }
+}
+/* 发尾鲸鱼尾：左右摆动 */
+.hair-tail { animation: tailWiggle 1.6s ease-in-out infinite; }
+.hair-tail.left { transform-origin: 78px 120px; }
+.hair-tail.right { transform-origin: 162px 120px; animation-direction: reverse; }
+@keyframes tailWiggle {
+  0%, 100% { transform: rotate(0); }
+  50% { transform: rotate(9deg); }
+}
+/* 呆毛弹动 */
+.ahoge { animation: ahogeWiggle 2.6s ease-in-out infinite; transform-origin: 120px 24px; }
+@keyframes ahogeWiggle {
+  0%, 100% { transform: rotate(0); }
+  50% { transform: rotate(7deg); }
+}
+/* 鲸鱼帽尾鳍 + 徽章尾鳍 */
+.cap-tail { animation: tailWiggle 1.6s ease-in-out infinite; transform-origin: 150px 42px; animation-direction: reverse; }
+.badge-tail { animation: tailWiggle 1.6s ease-in-out infinite; transform-origin: 138px 178px; animation-direction: reverse; }
+/* 身后鲸鱼尾 */
+.whale-real-tail { animation: tailWiggle 1.8s ease-in-out infinite; transform-origin: 112px 210px; }
+.w-bub { animation: bubbleUp 2.9s ease-out infinite; opacity: 0; }
+.b1 { animation-delay: 0s; }
+.b2 { animation-delay: 1s; }
+.b3 { animation-delay: 1.9s; }
+@keyframes bubbleUp {
+  0% { transform: translate(0, 0) scale(.5); opacity: 0; }
+  18% { opacity: .85; }
+  100% { transform: translate(16px, -56px) scale(1); opacity: 0; }
+}
+.whale-bubble {
+  position: absolute; top: -16px; right: 44px; max-width: 168px;
+  background: rgba(13, 21, 45, .88); border: 1px solid rgba(91, 140, 255, .45);
+  border-radius: 12px 12px 12px 3px; padding: 6px 11px;
+  font-size: 11.5px; color: #e2eeff; white-space: nowrap;
+  opacity: 0; transform: translateY(6px) scale(.9);
+  transition: all .22s var(--ease); pointer-events: none;
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, .38);
+}
+.pet-whale:hover .whale-bubble,
+.pet-whale.talking .whale-bubble { opacity: 1; transform: none; }
+/* AI 思考：鲸鱼娘兴奋加速 */
+.pet-whale.excited .whale-wrap { animation-duration: 1.15s; }
+.pet-whale.excited .hair-tail,
+.pet-whale.excited .cap-tail,
+.pet-whale.excited .badge-tail,
+.pet-whale.excited .whale-real-tail { animation-duration: .55s; }
+.pet-whale.excited .w-bub { animation-duration: 1.25s; }
+.pet-whale.excited { filter: drop-shadow(0 0 22px rgba(91, 140, 255, .6)); }
+
+.card { background: var(--glass-strong); border:1px solid var(--glass-border);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  box-shadow: var(--shadow-md); }
+header { background: rgba(10,12,20,.55); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
+[data-theme="light"] .card { background: rgba(255,255,255,.7); border-color:#E3EAF5; }
+[data-theme="light"] header { background: rgba(255,255,255,.6); }
+/* 主体内容浮在极光之上 */
+body { position: relative; }
+.left, .right, .toast-wrap, header, .theme-toggle { position: relative; z-index: 2; }
+
 </style>
 </head>
 <body>
+  <!-- ===== 动态极光背景 ===== -->
+  <div class="aurora">
+    <div class="aurora-blob blob-1"></div>
+    <div class="aurora-blob blob-2"></div>
+    <div class="aurora-blob blob-3"></div>
+    <div class="aurora-blob blob-4"></div>
+    <div class="aurora-beam"></div>
+    <div class="aurora-grid"></div>
+    <div class="aurora-multi"></div>
+  </div>
+  <div class="cursor-glow"></div>
+
 
 <header>
   <div class="brand">
@@ -802,6 +1034,195 @@ async function init() {
   loop();
 }
 init();
+
+
+  (function(){
+    document.addEventListener("mousemove", function(e){
+      var st=document.documentElement.style;
+      st.setProperty("--mx", e.clientX+"px");
+      st.setProperty("--my", e.clientY+"px");
+    });
+  })();
+
+function initWhale() {
+  const pet = document.querySelector("#pet-whale");
+  if (!pet) return;
+  const bub = document.querySelector("#whale-bubble");
+  const eyes = document.querySelectorAll(".whale-eye");
+  const LINES = [
+    "深度思考中… 🐳",
+    "让我潜入数据的深海",
+    "这道题我见过！",
+    "正在浮出水面…",
+    "让我想想 🤔",
+    "嘘…在思考",
+    "答案就在海面下！",
+    "我看过 DeepSeek 的文档",
+    "深海模式，启动！",
+  ];
+  // 眼睛跟随鼠标（节流到 rAF）
+  let raf = null;
+  document.addEventListener("mousemove", (e) => {
+    if (raf) return;
+    raf = requestAnimationFrame(() => {
+      raf = null;
+      const r = pet.getBoundingClientRect();
+      if (r.width === 0) return;
+      const cx = r.left + r.width * 0.66;
+      const cy = r.top + r.height * 0.42;
+      const dx = Math.max(-1, Math.min(1, (e.clientX - cx) / r.width));
+      const dy = Math.max(-1, Math.min(1, (e.clientY - cy) / r.height));
+      eyes.forEach((ey) => ey.setAttribute("transform", `translate(${dx * 4} ${dy * 3})`));
+    });
+  });
+  // 点击冒随机台词
+  pet.addEventListener("click", () => {
+    bub.textContent = LINES[Math.floor(Math.random() * LINES.length)];
+    pet.classList.add("talking");
+    clearTimeout(pet._t);
+    pet._t = setTimeout(() => pet.classList.remove("talking"), 2600);
+  });
+}
+
+  // 鲸鱼娘 HTML 注入在 </body> 前（本 script 之后），需等 DOM 就绪再绑事件。
+  // 防御性：node 冒烟桩无 querySelector/readyState 时静默跳过，不影响 init()
+  (function () {
+    try {
+      if (typeof document === "undefined" || !document.querySelector) return;
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", initWhale);
+      } else {
+        initWhale();
+      }
+    } catch (e) { /* 桩环境/异常不影响功能 */ }
+  })();
+
+/* 主题切换（浅色/深色）持久化 */
+(function () {
+  try {
+    if (typeof document === "undefined" || !document.documentElement
+        || !document.querySelector) return;
+    const KEY = "dsh_rb_theme";
+    const store = (typeof localStorage !== "undefined") ? localStorage : null;
+    if (store && store.getItem(KEY)) {
+      document.documentElement.setAttribute("data-theme", store.getItem(KEY));
+    }
+    const btn = document.createElement("button");
+    btn.className = "btn btn-ghost theme-toggle";
+    btn.id = "themeToggle";
+    btn.style.cssText = "padding:6px 12px;font-size:13px;";
+    const refresh = () => {
+      const t = document.documentElement.getAttribute("data-theme") === "light"
+        ? "light" : "dark";
+      btn.textContent = t === "light" ? "🌙 深色" : "☀️ 浅色";
+    };
+    btn.addEventListener("click", () => {
+      const cur = document.documentElement.getAttribute("data-theme") === "light"
+        ? "dark" : "light";
+      document.documentElement.setAttribute("data-theme", cur);
+      if (store) store.setItem(KEY, cur);
+      refresh();
+    });
+    refresh();
+    const hdr = document.querySelector("header .hdr-right");
+    if (hdr) hdr.appendChild(btn);
+  } catch (e) { /* 忽略 */ }
+})();
+
 </script>
+
+  <!-- ===== DeepSeek 鲸鱼娘页宠 ===== -->
+  <div id="pet-whale" class="pet-whale" title="DeepSeek 鲸鱼娘 · 点击互动">
+    <div id="whale-bubble" class="whale-bubble">🐳 我在呢！</div>
+    <svg class="whale-svg" viewBox="0 0 240 260" aria-hidden="true">
+      <defs>
+        <linearGradient id="wg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#5b8cff"/>
+          <stop offset="1" stop-color="#2b4df0"/>
+        </linearGradient>
+        <linearGradient id="wg2" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#7aa2ff"/>
+          <stop offset="1" stop-color="#4d6bfe"/>
+        </linearGradient>
+        <radialGradient id="weye" cx="0.4" cy="0.35" r="0.9">
+          <stop offset="0" stop-color="#6ea8ff"/>
+          <stop offset="0.55" stop-color="#3a63f5"/>
+          <stop offset="1" stop-color="#1d3bd6"/>
+        </radialGradient>
+        <linearGradient id="wskin" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#fff6ee"/>
+          <stop offset="1" stop-color="#ffe9d8"/>
+        </linearGradient>
+      </defs>
+
+      <g class="whale-wrap">
+        <!-- 身后鲸鱼尾（核心识别点：C 形 + 分叉尾鳍 + 白高光） -->
+        <g class="whale-real-tail">
+          <path d="M108 206 Q94 226 98 246 Q108 232 118 222 Q130 238 140 248 Q132 222 124 206 Z" fill="url(#wg)"/>
+          <path d="M98 246 Q84 256 74 262 Q92 260 100 252 Z" fill="url(#wg)"/>
+          <path d="M140 248 Q154 258 164 264 Q148 262 138 254 Z" fill="url(#wg)"/>
+          <path d="M110 210 Q102 226 104 238 Q112 226 116 218 Z" fill="#dce9ff" opacity=".85"/>
+        </g>
+        <!-- 后发：左右鲸鱼尾发束（灵魂特征：发尾分叉上翘成尾鳍） -->
+        <path class="hair-tail left" d="M78 62 Q58 84 50 118 Q44 142 26 150 Q52 156 64 132 Q76 106 84 76 Z" fill="url(#wg)"/>
+        <path class="hair-tail right" d="M162 62 Q182 84 190 118 Q196 142 214 150 Q188 156 176 132 Q164 106 156 76 Z" fill="url(#wg)"/>
+        <!-- 后发主体 -->
+        <path d="M120 46 Q70 50 62 96 Q58 130 70 158 Q76 170 84 168 Q80 140 84 116 Q88 96 120 94 Q152 96 156 116 Q160 140 156 168 Q164 170 170 158 Q182 130 178 96 Q170 50 120 46 Z" fill="url(#wg2)"/>
+        <!-- 头顶小鲸鱼帽 -->
+        <g class="whale-cap">
+          <path d="M88 42 Q120 24 152 42 Q120 54 88 42 Z" fill="#2748d6"/>
+          <ellipse cx="120" cy="42" rx="30" ry="11" fill="#dce9ff" opacity=".95"/>
+          <circle cx="112" cy="39" r="2" fill="#0a1f66"/>
+          <circle cx="128" cy="39" r="2" fill="#0a1f66"/>
+          <path class="cap-tail" d="M150 42 Q166 36 176 42 Q164 48 150 46 Z" fill="#2748d6"/>
+          <path d="M120 40 Q120 34 124 31 Q126 34 122 36 Z" fill="#a9d4ff"/>
+        </g>
+        <!-- 呆毛 -->
+        <path class="ahoge" d="M120 24 Q128 12 140 10 Q130 16 126 26 Z" fill="#7aa2ff"/>
+        <circle class="ahoge" cx="141" cy="10" r="4.5" fill="#7aa2ff"/>
+        <!-- 脸 -->
+        <ellipse cx="120" cy="102" rx="46" ry="50" fill="url(#wskin)"/>
+        <!-- 刘海 -->
+        <path d="M74 92 Q80 52 120 48 Q160 52 166 92 Q158 66 120 64 Q82 66 74 92 Z" fill="url(#wg2)"/>
+        <path d="M84 88 Q96 70 120 70 Q112 86 108 98 Z" fill="#7aa2ff" opacity=".7"/>
+        <path d="M156 88 Q144 70 120 70 Q128 86 132 98 Z" fill="#7aa2ff" opacity=".5"/>
+        <!-- 眼睛 -->
+        <ellipse cx="100" cy="104" rx="13" ry="15.5" fill="#fff"/>
+        <ellipse cx="140" cy="104" rx="13" ry="15.5" fill="#fff"/>
+        <g class="whale-eye">
+          <ellipse cx="100" cy="104" rx="10" ry="12.5" fill="url(#weye)"/>
+          <circle cx="103" cy="102" r="2.6" fill="#fff"/>
+          <circle cx="98" cy="108" r="1.3" fill="#fff" opacity=".8"/>
+        </g>
+        <g class="whale-eye">
+          <ellipse cx="140" cy="104" rx="10" ry="12.5" fill="url(#weye)"/>
+          <circle cx="143" cy="102" r="2.6" fill="#fff"/>
+          <circle cx="138" cy="108" r="1.3" fill="#fff" opacity=".8"/>
+        </g>
+        <!-- 腮红（缩小上移） -->
+        <ellipse cx="84" cy="113" rx="6.5" ry="3.6" fill="#ff9db8" opacity=".6"/>
+        <ellipse cx="156" cy="113" rx="6.5" ry="3.6" fill="#ff9db8" opacity=".6"/>
+        <!-- 嘴（微笑，上移加大） -->
+        <path d="M109 119 Q120 129 131 119" stroke="#c94f7c" stroke-width="2.8" fill="none" stroke-linecap="round"/>
+        <!-- 身体：白色圆领 + 淡蓝围裙 -->
+        <path d="M74 148 Q120 138 166 148 L170 210 Q120 224 70 210 Z" fill="#ffffff"/>
+        <path d="M88 152 Q120 146 152 152 L148 208 Q120 218 92 208 Z" fill="#e8f0ff"/>
+        <!-- 围裙波浪边 -->
+        <path d="M92 206 Q104 214 120 208 Q136 214 148 206 L146 198 Q132 204 120 199 Q108 204 94 198 Z" fill="#dce9ff"/>
+        <!-- 领口蝴蝶结 -->
+        <path d="M112 152 L104 142 L112 148 Z" fill="#ffd6e8"/>
+        <path d="M128 152 L136 142 L128 148 Z" fill="#ffd6e8"/>
+        <circle cx="120" cy="152" r="4" fill="#ffb3d1"/>
+        <!-- 胸口小鲸鱼徽章 -->
+        <path class="badge-tail" d="M136 176 Q148 172 154 176 Q148 181 138 179 Z" fill="#2748d6"/>
+        <ellipse cx="130" cy="180" rx="10" ry="6.5" fill="#2748d6"/>
+        <ellipse cx="131" cy="182" rx="6" ry="3.2" fill="#dce9ff" opacity=".95"/>
+        <circle cx="127" cy="178.5" r="1" fill="#fff"/>
+        <!-- 泡泡 -->
+        <circle class="w-bub b1" cx="196" cy="120" r="5" fill="#bcd4ff"/>
+        <circle class="w-bub b2" cx="206" cy="98" r="3.4" fill="#cfe0ff"/>
+        <circle class="w-bub b3" cx="192" cy="78" r="2.6" fill="#e2eeff"/>
+      </g>
+    </svg>
 </body>
 </html>

@@ -139,15 +139,33 @@ def messages_to_openai(messages: List[Message]) -> List[Dict[str, Any]]:
     """
     把派生历史投影为 OpenAI 兼容的 messages 列表。
 
-    tool-result 块被折叠成 role=tool 消息；其余按角色分组。
+    - tool-result 块被折叠成 role=tool 消息；
+    - tool-call 块投影到 assistant 消息**顶层** ``tool_calls`` 数组
+      （OpenAI / 火山方舟标准——content 数组里的 ``{"type":"tool_call"}``
+      会被方舟以 ``InvalidParameter`` 400 拒绝，实测定案）；
+    - 其余块按角色分组进 content。
     """
     out: List[Dict[str, Any]] = []
     for message in messages:
         tool_results = [b for b in message.content if b.kind == "tool-result"]
         normal = [b for b in message.content if b.kind != "tool-result"]
-        if normal:
-            out.append({"role": message.role,
-                        "content": [b.to_openai() for b in normal]})
+        tool_calls = [b for b in normal if b.kind == "tool-call"]
+        content_blocks = [b for b in normal if b.kind != "tool-call"]
+        if content_blocks or tool_calls:
+            entry: Dict[str, Any] = {"role": message.role}
+            if content_blocks:
+                entry["content"] = [b.to_openai() for b in content_blocks]
+            else:
+                # OpenAI 兼容端点要求 assistant 消息带 content 字段（可空串）
+                entry["content"] = ""
+            if tool_calls:
+                entry["tool_calls"] = [
+                    {"id": block.call_id or f"call-{index}",
+                     "type": "function",
+                     "function": {"name": block.name or "",
+                                  "arguments": block.arguments or "{}"}}
+                    for index, block in enumerate(tool_calls)]
+            out.append(entry)
         for block in tool_results:
             out.append({"role": "tool", "tool_call_id": block.tool_call_id or "",
                         "content": str(block.content)})

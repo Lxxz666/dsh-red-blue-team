@@ -335,8 +335,8 @@ async def test_schedule_injects_notification(tmp_path):
         schedule.apply(ctx)
         agent = await ctx.agents.create(options={"provider": "mock",
                                                  "model": "mock"})
-        schedule.register("检查一下", interval_seconds=0.2)
-        await asyncio.sleep(1.2)
+        schedule.register("检查一下", interval_seconds=1.0)
+        await asyncio.sleep(2.2)
         snapshot = agent.inbox.snapshot()
         assert len(snapshot["next_step"]) >= 1
         schedule.close()

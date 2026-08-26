@@ -18,10 +18,24 @@ IS_WINDOWS = sys.platform == "win32"
 
 
 def _shell_command(script: str) -> List[str]:
-    """按平台构造 shell argv。"""
+    """按平台构造 shell argv。
+
+    Windows 优先 pwsh；未安装则回退 git-bash 的 bash（本机常见环境），
+    再退 Windows PowerShell 5.1。POSIX 直接用 bash。
+    """
     if IS_WINDOWS:
-        return ["pwsh", "-NoProfile", "-Command", script]
+        if _which("pwsh"):
+            return ["pwsh", "-NoProfile", "-Command", script]
+        if _which("bash"):
+            return ["bash", "-lc", script]
+        return ["powershell.exe", "-NoProfile", "-Command", script]
     return ["bash", "-lc", script]
+
+
+def _which(name: str) -> Optional[str]:
+    """定位可执行文件（找不到返回 None）。"""
+    import shutil
+    return shutil.which(name)
 
 
 def _spawn_background(run_ctx, script: str, cwd: str, timeout: float):

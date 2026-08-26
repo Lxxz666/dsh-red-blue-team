@@ -63,14 +63,33 @@ class AgentInstructionsPlugin(Service):
         return os.getcwd()
 
     def _read_root_instructions(self) -> str:
-        """读取工作区根 AGENTS.md（不存在返回空串）。"""
-        path = os.path.join(self._workspace(), AGENTS_FILENAME)
-        if not os.path.exists(path):
+        """读取工作区根 AGENTS.md + 附加指令文件（CLAUDE.md 等）。
+
+        受设置 ``context.instructions`` 控制：
+        ``{"enabled": bool, "extra_files": ["CLAUDE.md", ...]}``
+        """
+        enabled = True
+        extra_files = ["CLAUDE.md"]
+        if self.ctx.has("settings"):
+            ctx_cfg = self.ctx.settings.get("context")
+            if isinstance(ctx_cfg, dict):
+                instr = ctx_cfg.get("instructions", {})
+                if isinstance(instr, dict):
+                    enabled = instr.get("enabled", True)
+                    extra_files = instr.get("extra_files", ["CLAUDE.md"])
+        if not enabled:
             return ""
-        try:
-            return open(path, "r", encoding="utf-8").read()
-        except OSError:
-            return ""
+        root = self._workspace()
+        parts = []
+        for name in [AGENTS_FILENAME] + list(extra_files or []):
+            path = os.path.join(root, name)
+            if not os.path.exists(path):
+                continue
+            try:
+                parts.append(open(path, "r", encoding="utf-8").read())
+            except OSError:
+                continue
+        return "\n\n".join(p for p in parts if p)
 
     # ---- 子目录监视 ----
 

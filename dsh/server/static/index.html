@@ -2,41 +2,104 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>dsh-python · DeepSeek Harness (Python)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>dsh-python · DeepSeek Harness</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%2322D3EE'/><text x='16' y='23' font-size='19' font-weight='700' text-anchor='middle' fill='%230A0C14'>d</text></svg>">
 </head>
 <body>
-  <aside id="sidebar">
-    <div class="brand">
-      <span class="logo">dsh</span><span>python</span>
-    </div>
-    <button id="btn-new" class="new-btn">＋ 新会话</button>
-    <div id="session-list" class="session-list"></div>
-    <div class="sidebar-foot">
-      <div id="providers" class="providers">providers: …</div>
-      <div class="hint">斜杠命令: /help /goal /compact /plan</div>
-    </div>
-  </aside>
 
+  <!-- ===== 动态极光背景 ===== -->
+  <div class="aurora">
+    <div class="aurora-blob blob-1"></div>
+    <div class="aurora-blob blob-2"></div>
+    <div class="aurora-blob blob-3"></div>
+    <div class="aurora-blob blob-4"></div>
+    <div class="aurora-beam"></div>
+    <div class="aurora-grid"></div>
+    <div class="aurora-multi"></div>
+  </div>
+
+  <!-- 粒子系统（漂浮光点，鼠标推开） -->
+  <canvas id="particles"></canvas>
+
+  <!-- 鼠标光标光晕 -->
+  <div class="cursor-glow"></div>
+
+  <!-- ===== 顶栏（极简玻璃） ===== -->
+  <header id="topbar">
+    <div class="tb-left">
+      <div class="tb-brand">d</div>
+      <button id="btn-sessions" class="session-trigger" title="会话">
+        <span id="session-title" class="session-title">新会话</span><span class="caret">▾</span>
+      </button>
+    </div>
+    <div class="tb-right">
+      <span id="model-label" class="model-label"></span>
+      <span id="speed-label" class="speed-label hidden">⚡ 0 tok/s</span>
+      <span id="status" class="status idle"><span class="status-dot"></span><span id="status-text">idle</span></span>
+      <button id="btn-cancel" class="ghost-btn cancel-btn" title="停止">■</button>
+      <button id="btn-settings" class="ghost-btn" title="设置 (Ctrl+K)">⚙️</button>
+    </div>
+  </header>
+
+  <!-- ===== 会话浮层（点击会话名弹出，不常驻） ===== -->
+  <div id="session-pop" class="session-pop hidden">
+    <div class="pop-head">
+      <span>会话</span>
+      <span id="session-count" class="pop-count">0</span>
+    </div>
+    <button id="btn-new" class="pop-new">＋ 新会话</button>
+    <div id="session-list" class="pop-list"></div>
+    <div class="pop-foot">
+      <span class="dot dot-live"></span>
+      <span id="providers" class="providers">连接中…</span>
+    </div>
+  </div>
+
+  <!-- ===== 空状态 ===== -->
+  <div id="empty" class="empty hidden">
+    <div class="empty-logo">d</div>
+    <h2>向 dsh 提问</h2>
+    <p class="empty-sub">一切皆插件的智能体框架 · 火山方舟驱动</p>
+    <div class="empty-chips">
+      <button class="chip" data-prompt="介绍一下你自己">介绍一下你自己</button>
+      <button class="chip" data-prompt="列出当前会话可用的工具">列出可用工具</button>
+      <button class="chip" data-prompt="用 code 工具算 2 的 10 次方">用 code 工具算 2^10</button>
+    </div>
+    <button id="btn-cmd-empty" class="cmd-empty-btn" title="命令面板 (Ctrl+K)">
+      <span class="ce-icon">✦</span> 打开命令面板
+      <kbd class="ce-kbd">Ctrl K</kbd>
+    </button>
+  </div>
+
+  <!-- ===== 消息流（全屏沉浸） ===== -->
   <main id="main">
-    <header id="topbar">
-      <div id="session-title">新会话</div>
-      <div class="topbar-right">
-        <span id="status" class="status idle">idle</span>
-        <button id="btn-cancel" class="cancel-btn" title="停止当前 turn">■ 停止</button>
-      </div>
-    </header>
     <div id="messages" class="messages"></div>
-    <footer id="inputbar">
-      <textarea id="input" rows="1" placeholder="输入消息或 / 命令…（Enter 发送，Shift+Enter 换行）"></textarea>
-      <button id="btn-send" class="send-btn">发送</button>
-    </footer>
+
+    <!-- 悬浮输入坞 -->
+    <div id="dock" class="dock">
+      <div class="input-progress" id="scroll-progress"></div>
+      <div class="input-wrap">
+        <button id="btn-cmd" class="cmd-btn" title="命令面板 (Ctrl+K)">⌘</button>
+        <textarea id="input" rows="1" placeholder="输入消息或 / 命令…（Enter 发送，Shift+Enter 换行）"></textarea>
+        <button id="btn-send" class="send-btn"><span class="send-ico">✦</span><span class="send-text">发送</span></button>
+      </div>
+      <div class="input-foot">
+        <span>Enter 发送 · Shift+Enter 换行 · / 命令 · <b>Ctrl+K</b> 面板</span>
+        <span id="count-label" class="count-label"></span>
+        <span id="typing-hint" class="typing-hint hidden"></span>
+      </div>
+    </div>
   </main>
 
+  <!-- ===== 审批 / 问答弹窗 ===== -->
   <div id="modal" class="modal hidden">
     <div class="modal-box">
-      <div class="modal-title">需要人工确认</div>
+      <div class="modal-head">
+        <span id="modal-icon" class="modal-icon">🛡️</span>
+        <span id="modal-kind" class="modal-kind">需要人工确认</span>
+      </div>
       <div id="modal-question" class="modal-question"></div>
       <div id="modal-detail" class="modal-detail"></div>
       <textarea id="modal-input" class="modal-input hidden" rows="3" placeholder="输入你的回答…"></textarea>
@@ -45,6 +108,224 @@
         <button id="modal-allow" class="primary">允许</button>
       </div>
     </div>
+  </div>
+
+  <!-- 轻提示 -->
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- ===== DeepSeek 鲸鱼娘页宠 ===== -->
+  <div id="pet-whale" class="pet-whale" title="DeepSeek 鲸鱼娘 · 点击互动">
+    <div id="whale-bubble" class="whale-bubble">🐳 我在呢！</div>
+    <svg class="whale-svg" viewBox="0 0 240 260" aria-hidden="true">
+      <defs>
+        <linearGradient id="wg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#5b8cff"/>
+          <stop offset="1" stop-color="#2b4df0"/>
+        </linearGradient>
+        <linearGradient id="wg2" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#7aa2ff"/>
+          <stop offset="1" stop-color="#4d6bfe"/>
+        </linearGradient>
+        <radialGradient id="weye" cx="0.4" cy="0.35" r="0.9">
+          <stop offset="0" stop-color="#6ea8ff"/>
+          <stop offset="0.55" stop-color="#3a63f5"/>
+          <stop offset="1" stop-color="#1d3bd6"/>
+        </radialGradient>
+        <linearGradient id="wskin" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#fff6ee"/>
+          <stop offset="1" stop-color="#ffe9d8"/>
+        </linearGradient>
+      </defs>
+
+      <g class="whale-wrap">
+        <!-- 身后鲸鱼尾（核心识别点：C 形 + 分叉尾鳍 + 白高光） -->
+        <g class="whale-real-tail">
+          <path d="M108 206 Q94 226 98 246 Q108 232 118 222 Q130 238 140 248 Q132 222 124 206 Z" fill="url(#wg)"/>
+          <path d="M98 246 Q84 256 74 262 Q92 260 100 252 Z" fill="url(#wg)"/>
+          <path d="M140 248 Q154 258 164 264 Q148 262 138 254 Z" fill="url(#wg)"/>
+          <path d="M110 210 Q102 226 104 238 Q112 226 116 218 Z" fill="#dce9ff" opacity=".85"/>
+        </g>
+        <!-- 后发：左右鲸鱼尾发束（灵魂特征：发尾分叉上翘成尾鳍） -->
+        <path class="hair-tail left" d="M78 62 Q58 84 50 118 Q44 142 26 150 Q52 156 64 132 Q76 106 84 76 Z" fill="url(#wg)"/>
+        <path class="hair-tail right" d="M162 62 Q182 84 190 118 Q196 142 214 150 Q188 156 176 132 Q164 106 156 76 Z" fill="url(#wg)"/>
+        <!-- 后发主体 -->
+        <path d="M120 46 Q70 50 62 96 Q58 130 70 158 Q76 170 84 168 Q80 140 84 116 Q88 96 120 94 Q152 96 156 116 Q160 140 156 168 Q164 170 170 158 Q182 130 178 96 Q170 50 120 46 Z" fill="url(#wg2)"/>
+        <!-- 头顶小鲸鱼帽 -->
+        <g class="whale-cap">
+          <path d="M88 42 Q120 24 152 42 Q120 54 88 42 Z" fill="#2748d6"/>
+          <ellipse cx="120" cy="42" rx="30" ry="11" fill="#dce9ff" opacity=".95"/>
+          <circle cx="112" cy="39" r="2" fill="#0a1f66"/>
+          <circle cx="128" cy="39" r="2" fill="#0a1f66"/>
+          <path class="cap-tail" d="M150 42 Q166 36 176 42 Q164 48 150 46 Z" fill="#2748d6"/>
+          <path d="M120 40 Q120 34 124 31 Q126 34 122 36 Z" fill="#a9d4ff"/>
+        </g>
+        <!-- 呆毛 -->
+        <path class="ahoge" d="M120 24 Q128 12 140 10 Q130 16 126 26 Z" fill="#7aa2ff"/>
+        <circle class="ahoge" cx="141" cy="10" r="4.5" fill="#7aa2ff"/>
+        <!-- 脸 -->
+        <ellipse cx="120" cy="102" rx="46" ry="50" fill="url(#wskin)"/>
+        <!-- 刘海 -->
+        <path d="M74 92 Q80 52 120 48 Q160 52 166 92 Q158 66 120 64 Q82 66 74 92 Z" fill="url(#wg2)"/>
+        <path d="M84 88 Q96 70 120 70 Q112 86 108 98 Z" fill="#7aa2ff" opacity=".7"/>
+        <path d="M156 88 Q144 70 120 70 Q128 86 132 98 Z" fill="#7aa2ff" opacity=".5"/>
+        <!-- 眼睛 -->
+        <ellipse cx="100" cy="104" rx="13" ry="15.5" fill="#fff"/>
+        <ellipse cx="140" cy="104" rx="13" ry="15.5" fill="#fff"/>
+        <g class="whale-eye">
+          <ellipse cx="100" cy="104" rx="10" ry="12.5" fill="url(#weye)"/>
+          <circle cx="103" cy="102" r="2.6" fill="#fff"/>
+          <circle cx="98" cy="108" r="1.3" fill="#fff" opacity=".8"/>
+        </g>
+        <g class="whale-eye">
+          <ellipse cx="140" cy="104" rx="10" ry="12.5" fill="url(#weye)"/>
+          <circle cx="143" cy="102" r="2.6" fill="#fff"/>
+          <circle cx="138" cy="108" r="1.3" fill="#fff" opacity=".8"/>
+        </g>
+        <!-- 腮红（缩小上移） -->
+        <ellipse cx="84" cy="113" rx="6.5" ry="3.6" fill="#ff9db8" opacity=".6"/>
+        <ellipse cx="156" cy="113" rx="6.5" ry="3.6" fill="#ff9db8" opacity=".6"/>
+        <!-- 嘴（微笑，上移加大） -->
+        <path d="M109 119 Q120 129 131 119" stroke="#c94f7c" stroke-width="2.8" fill="none" stroke-linecap="round"/>
+        <!-- 身体：白色圆领 + 淡蓝围裙 -->
+        <path d="M74 148 Q120 138 166 148 L170 210 Q120 224 70 210 Z" fill="#ffffff"/>
+        <path d="M88 152 Q120 146 152 152 L148 208 Q120 218 92 208 Z" fill="#e8f0ff"/>
+        <!-- 围裙波浪边 -->
+        <path d="M92 206 Q104 214 120 208 Q136 214 148 206 L146 198 Q132 204 120 199 Q108 204 94 198 Z" fill="#dce9ff"/>
+        <!-- 领口蝴蝶结 -->
+        <path d="M112 152 L104 142 L112 148 Z" fill="#ffd6e8"/>
+        <path d="M128 152 L136 142 L128 148 Z" fill="#ffd6e8"/>
+        <circle cx="120" cy="152" r="4" fill="#ffb3d1"/>
+        <!-- 胸口小鲸鱼徽章 -->
+        <path class="badge-tail" d="M136 176 Q148 172 154 176 Q148 181 138 179 Z" fill="#2748d6"/>
+        <ellipse cx="130" cy="180" rx="10" ry="6.5" fill="#2748d6"/>
+        <ellipse cx="131" cy="182" rx="6" ry="3.2" fill="#dce9ff" opacity=".95"/>
+        <circle cx="127" cy="178.5" r="1" fill="#fff"/>
+        <!-- 泡泡 -->
+        <circle class="w-bub b1" cx="196" cy="120" r="5" fill="#bcd4ff"/>
+        <circle class="w-bub b2" cx="206" cy="98" r="3.4" fill="#cfe0ff"/>
+        <circle class="w-bub b3" cx="192" cy="78" r="2.6" fill="#e2eeff"/>
+      </g>
+    </svg>
+  </div>
+
+  <!-- ===== Ctrl+K 命令面板（Raycast 风格） ===== -->
+  <div id="cmd-palette" class="cmd-palette hidden">
+    <div class="cmd-box">
+      <div class="cmd-search">
+        <span class="cmd-icon">⌘</span>
+        <input id="cmd-input" type="text" placeholder="输入命令或搜索会话…" autocomplete="off" spellcheck="false">
+        <span id="cmd-hint" class="cmd-hint"></span>
+      </div>
+      <div id="cmd-list" class="cmd-list"></div>
+    </div>
+  </div>
+
+  <!-- ===== 设置抽屉 ===== -->
+  <div id="drawer" class="drawer">
+    <div class="drawer-head">
+      <div class="drawer-title">设置</div>
+      <button id="drawer-close" class="drawer-close" title="关闭">×</button>
+    </div>
+
+    <div class="set-group">
+      <div class="set-label">模型</div>
+      <div class="set-row">
+        <label for="set-provider">Provider</label>
+        <select id="set-provider"></select>
+      </div>
+      <div class="set-row">
+        <label for="set-model">模型 ID</label>
+        <input type="text" id="set-model" placeholder="deepseek-v4-flash">
+        <div class="hint">方舟示例：deepseek-v4-flash；留空用适配器默认</div>
+      </div>
+      <div class="set-row">
+        <label for="set-temp">温度</label>
+        <div class="set-range">
+          <input type="range" id="set-temp" min="0" max="2" step="0.1" value="0.7">
+          <span class="val" id="set-temp-val">0.7</span>
+        </div>
+        <div class="hint">数值越高回答越随机；0 = 确定性输出</div>
+      </div>
+      <div class="set-row">
+        <label for="set-maxtok">max_tokens（0 = 不限制）</label>
+        <input type="number" id="set-maxtok" min="0" step="100" value="0">
+        <div class="hint">单次回复最大 token 数</div>
+      </div>
+    </div>
+
+    <div class="set-group">
+      <div class="set-label">外观</div>
+      <div class="set-row">
+        <label for="set-theme">主题</label>
+        <select id="set-theme">
+          <option value="dark">极光深空</option>
+          <option value="light">雪白晨曦</option>
+        </select>
+      </div>
+      <div class="set-row">
+        <label for="set-font">字体大小</label>
+        <div class="set-range">
+          <input type="range" id="set-font" min="13" max="17" step="1" value="15">
+          <span class="val" id="set-font-val">15px</span>
+        </div>
+      </div>
+      <div class="set-row">
+        <label for="set-density">消息密度</label>
+        <select id="set-density">
+          <option value="comfortable">舒适</option>
+          <option value="compact">紧凑</option>
+        </select>
+      </div>
+      <div class="set-row">
+        <label for="set-aurora">极光背景强度</label>
+        <div class="set-range">
+          <input type="range" id="set-aurora" min="0" max="100" step="5" value="70">
+          <span class="val" id="set-aurora-val">70%</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="set-group">
+      <div class="set-label">上下文与文档</div>
+      <div class="toggle">
+        <label>加载 AGENTS.md</label>
+        <span class="switch">
+          <input type="checkbox" id="set-agents" checked>
+          <span class="slider"></span>
+        </span>
+      </div>
+      <div class="toggle">
+        <label>加载 CLAUDE.md</label>
+        <span class="switch">
+          <input type="checkbox" id="set-claude" checked>
+          <span class="slider"></span>
+        </span>
+      </div>
+      <div class="set-row">
+        <label for="set-extra-md">附加指令 .md 文件（逗号分隔）</label>
+        <input type="text" id="set-extra-md" placeholder="RULES.md, guidelines.md">
+        <div class="hint">工作区根目录下，按顺序追加到系统提示中</div>
+      </div>
+      <div class="set-row">
+        <label for="set-compact">上下文压缩阈值（token）</label>
+        <input type="number" id="set-compact" min="1000" step="500" value="8000">
+        <div class="hint">会话超阈值后自动压缩历史</div>
+      </div>
+    </div>
+
+    <div class="set-group">
+      <div class="set-label">会话</div>
+      <div class="toggle">
+        <label>自动生成会话标题</label>
+        <span class="switch">
+          <input type="checkbox" id="set-autotitle" checked>
+          <span class="slider"></span>
+        </span>
+      </div>
+    </div>
+
+    <button id="set-save" class="set-save">保存设置</button>
+    <div id="set-status" class="set-status"></div>
   </div>
 
   <script src="/static/app.js"></script>

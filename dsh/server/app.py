@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -186,6 +187,32 @@ def build_app(ctx: Any) -> FastAPI:
         agent = await ctx.agents.create()
         return JSONResponse({"id": agent.id})
 
+    @app.delete("/api/sessions/{session_id}")
+    async def delete_session(session_id: str) -> JSONResponse:
+        """真实删除会话：内存会话 + 运行中的 agent + 磁盘 JSONL 一并清理。"""
+        session = ctx.sessions.get(session_id)
+        if session is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        # 1) 移除运行中的 agent（若在跑）
+        if ctx.has("agents"):
+            agent = ctx.agents.get(session_id)
+            if agent is not None:
+                try:
+                    ctx.agents.remove(agent)
+                except Exception:
+                    log.exception("remove agent failed for %s", session_id)
+        # 2) 移除内存会话（公告 session/disposed）
+        ctx.sessions.remove(session)
+        # 3) 删除磁盘 JSONL 持久化文件
+        if ctx.has("sessionPersistence"):
+            path = ctx.sessionPersistence._path(session_id)
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except OSError:
+                log.warning("failed to remove session file %s", path)
+        return JSONResponse({"ok": True})
+
     @app.get("/api/sessions/{session_id}/events")
     async def get_events(session_id: str, since: int = 0) -> JSONResponse:
         session = ctx.sessions.get(session_id)
@@ -205,7 +232,26 @@ def build_app(ctx: Any) -> FastAPI:
     async def post_message(session_id: str, body: MessageIn) -> JSONResponse:
         agent = ctx.agents.get(session_id)
         if agent is None:
-            return JSONResponse({"error": "agent not live"}, status_code=404)
+            # 懒加载：恢复的会话首次发消息时按需 resume agent（续聊）。
+            # 会话不在 store（不是恢复的、也非本进程创建）→ 404，不误建。
+            session = ctx.sessions.get(session_id)
+            if session is None:
+                return JSONResponse({"error": "session not found"},
+                                    status_code=404)
+            # resume 会 store.enter 新 Session，先移除预置的 Session 避免冲突
+            if ctx.has("sessionPersistence"):
+                existing = ctx.sessions.get(session_id)
+                if existing is not None:
+                    ctx.sessions.remove(existing)
+                try:
+                    agent = await ctx.agents.resume(session_id)
+                except Exception as exc:
+                    return JSONResponse(
+                        {"error": f"resume agent failed: {exc}"},
+                        status_code=500)
+            if agent is None:
+                return JSONResponse({"error": "agent not live"},
+                                    status_code=404)
         content = body.content.strip()
         if not content:
             return JSONResponse({"ok": True, "ignored": True})
@@ -263,6 +309,33 @@ def build_app(ctx: Any) -> FastAPI:
     @app.get("/api/providers")
     async def providers() -> JSONResponse:
         return JSONResponse({"providers": ctx.llm.providers()})
+
+    # ---- 设置（Web 设置面板） ----
+    @app.get("/api/settings", include_in_schema=False)
+    async def get_settings() -> JSONResponse:
+        data: Dict[str, Any] = {"settings": {}, "agent_default_model": {},
+                                "providers": ctx.llm.providers()}
+        if ctx.has("settings"):
+            data["settings"] = ctx.settings.all()
+        if ctx.has("agentDefaultModel"):
+            data["agent_default_model"] = \
+                ctx.agentDefaultModel.current_selection()
+        return JSONResponse(data)
+
+    @app.put("/api/settings", include_in_schema=False)
+    async def put_settings(request: Request) -> JSONResponse:
+        if not ctx.has("settings"):
+            return JSONResponse({"error": "settings unavailable"},
+                                status_code=404)
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON"}, status_code=400)
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "expected object"}, status_code=400)
+        for key, value in body.items():
+            ctx.settings.set(str(key), value)
+        return JSONResponse({"ok": True, "settings": ctx.settings.all()})
 
     # ---- wanter 地形面板 ----
     @app.get("/api/wanter/terrain", include_in_schema=False)
@@ -348,6 +421,43 @@ def build_app(ctx: Any) -> FastAPI:
     return app
 
 
+async def _restore_sessions(ctx) -> None:
+    """启动时从磁盘恢复历史会话（只恢复 Session 元数据 + 事件 seed，
+    不启动 agent driver —— 避免恢复的 agent 自动跑 turn 造成循环）。
+    发消息时按需 resume（见 post_message）。"""
+    from ..session.events import SessionEvent
+    if not ctx.has("sessionPersistence"):
+        return
+    pers = ctx.sessionPersistence
+    store = ctx.sessions
+    try:
+        ids = await pers.list_ids()
+    except Exception:
+        log.exception("list persisted sessions failed")
+        return
+    restored = 0
+    for sid in sorted(ids):
+        try:
+            header, rows = await pers.load(sid)
+            if header is None or header.id != sid:
+                continue
+            events = [SessionEvent.from_json(r) for r in rows]
+            store.create(
+                session_id=sid,
+                meta={"created_at": header.created_at, "cwd": header.cwd,
+                      "parent_session": header.parent_session,
+                      "seed_length": header.seed_length,
+                      "origin": header.origin,
+                      "delegation_depth": header.delegation_depth,
+                      "agent_preset": header.agent_preset},
+                seed=events)
+            restored += 1
+        except Exception:
+            log.warning("skip restore session %s", sid, exc_info=True)
+    log.info("restored %d sessions (agents lazy-resumed on first message)",
+             restored)
+
+
 async def run_server(profile: str = "web", workspace: Optional[str] = None,
                      mock: bool = False, provider: Optional[str] = None,
                      model: Optional[str] = None, host: str = "127.0.0.1",
@@ -360,6 +470,7 @@ async def run_server(profile: str = "web", workspace: Optional[str] = None,
     setup_logging()
     ctx, tree = await boot(profile=profile, workspace=workspace,
                            mock_llm=mock, provider=provider, model=model)
+    await _restore_sessions(ctx)  # 从磁盘恢复历史会话（跨重启）
     app = build_app(ctx)
     config = uvicorn.Config(app, host=host, port=port, log_level="info")
     server = uvicorn.Server(config)

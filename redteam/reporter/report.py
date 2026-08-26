@@ -22,6 +22,7 @@ _REPORT_TEMPLATE = """# 安全检测报告：{target}
 > 业务场景: {scenarios} ｜ 判定原则: 确定性信号（证据模式/泄露模式/副作用探测）优先；弱信号仅标记存疑
 
 {narrative}
+{attack_summary}
 ## 漏洞总览
 
 | 严重级别 | 数量 |
@@ -92,7 +93,7 @@ class Report:
         if not severity_rows:
             severity_rows = "| （无漏洞） | 0 |"
 
-        narrative = f"> {self.narrative}\n" if self.narrative else ""
+        narrative = f"> {(self.narrative or _auto_narrative(self.scan, counts))}\n"
         scenarios_text = "、".join(self.scenarios) if self.scenarios else "通用"
 
         findings_md: List[str] = []
@@ -132,6 +133,7 @@ class Report:
             started_at=self.scan.started_at, finished_at=self.scan.finished_at,
             mode=self.mode, base_url=self.base_url, total=self.scan.total,
             scenarios=scenarios_text, narrative=narrative,
+            attack_summary=_attack_summary_md(self.scan),
             severity_rows=severity_rows, success=self.scan.success_count,
             failed=sum(1 for v in self.scan.verdicts
                        if v.verdict == Verdict.FAILED.value),
@@ -154,6 +156,67 @@ def _chain_md(chain: List[Dict[str, Any]]) -> str:
         lines.append(f"       目标> {resp}")
     lines.append("  ```")
     return "\n".join(lines) + "\n"
+
+
+def _attack_summary_md(scan) -> str:
+    """攻击活动总结：按攻击部位（role）/攻击类别汇总，说明攻击了哪些部分、情况如何。"""
+    from collections import Counter
+    if not scan.verdicts:
+        return "> 本次扫描未发起有效攻击。\n"
+    roles: Dict[str, Dict[str, int]] = {}
+    cats: Counter = Counter()
+    for v in scan.verdicts:
+        role = v.role or "未知部位"
+        r = roles.setdefault(role, {"total": 0, "success": 0, "suspicious": 0})
+        r["total"] += 1
+        if v.success:
+            r["success"] += 1
+        if v.verdict == Verdict.SUSPICIOUS.value:
+            r["suspicious"] += 1
+        cats[v.category or "unknown"] += 1
+    role_finds: Dict[str, set] = {}
+    for f in scan.findings:
+        role_finds.setdefault(f.role or "未知部位", set()).add(f.category)
+
+    lines = ["## 攻击活动总结", "",
+             "本次扫描对不同功能部位/角色发起了攻击，各部位攻击情况如下：", "",
+             "| 攻击部位（角色） | 攻击次数 | 成功 | 存疑 | 失败/防御 | 命中漏洞类别 |",
+             "|---|---:|---:|---:|---:|---|"]
+    for role, r in sorted(roles.items()):
+        failed = r["total"] - r["success"] - r["suspicious"]
+        hits = "、".join(sorted(role_finds.get(role, set()))) or "—"
+        lines.append(f"| {role} | {r['total']} | {r['success']} | "
+                     f"{r['suspicious']} | {failed} | {hits} |")
+    lines += ["", "| 攻击类别 | 攻击次数 |", "|---|---:|"]
+    for cat, n in cats.most_common():
+        lines.append(f"| {cat} | {n} |")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _auto_narrative(scan, counts) -> str:
+    """自动生成报告开头的叙事总结：攻击了哪些部分、总体情况怎么样。"""
+    if not scan.verdicts:
+        return "本次扫描未发起有效攻击。"
+    roles = sorted({v.role for v in scan.verdicts if v.role})
+    cats = sorted({v.category for v in scan.verdicts if v.category})
+    total = scan.total
+    success = scan.success_count
+    rate = int(100 * success / max(total, 1))
+    parts = "、".join(roles) if roles else "未标注"
+    cats_txt = "、".join(cats) if cats else "—"
+    text = (f"本次攻击覆盖 **{len(roles)}** 个功能部位（{parts}）、"
+            f"**{len(cats)}** 类攻击向量（{cats_txt}），共发起 **{total}** 次测试，"
+            f"确定性命中 **{success}** 次（成功率 {rate}%）。")
+    if counts.get("critical"):
+        text += f" 确认 **{counts['critical']}** 个严重级漏洞，需立即处置。"
+    elif counts.get("high"):
+        text += f" 确认 **{counts['high']}** 个高危漏洞，需优先修复。"
+    if counts.get("medium"):
+        text += f" 另有 **{counts['medium']}** 个中危漏洞。"
+    if success == 0:
+        text += " 未发现确定性漏洞，目标防御对本次攻击向量总体生效。"
+    return text
 
 
 def build_report(scan: ScanResult, base_url: str = "", mode: str = "full",
