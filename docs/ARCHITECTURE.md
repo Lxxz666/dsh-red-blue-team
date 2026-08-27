@@ -106,6 +106,7 @@ CVE-lite 依赖版本表、Docker root/privileged、敏感文件（.env/私钥/�
 | `dsh.llm.LlmRuntime/MockAdapter/DeepSeekAdapter` | `runtime.py` + `vectors/` | LLM 接缝：mock 默认离线确定性；有密钥自动挂 DeepSeek（弱裁判/态势综述/**载荷变体生成**） |
 | `dsh.mcp.McpClient` | `adapters/mcp_adapter.py` | MCP 目标适配：initialize → tools/list → tools/call |
 | `dsh.kernel.Context.scoped/effect` | `runtime.py` | 服务生命周期/可逆效应（dispose 逆序回收） |
+| `dsh.agent.reflexion.ReflexionService` | `runtime.py`（base bundle 挂载） | **失败反思**（论文2303.11366）：turn 失败→LLM 生成第一人称教训→写长时记忆→pre-step 检索注入；`REFLECTION_ENABLED=1` 门控（强模型） |
 
 **LLM 载荷变体（opt-in）**：`vectors.llm_variants: true` 且 DeepSeek 可用时，
 主 Agent 攻击计划为对话型基础样本生成语义等价变体（JSON 数组/列表行双格式解析，
