@@ -121,6 +121,8 @@ def build_parser() -> argparse.ArgumentParser:
     infra.add_argument("--ports", default=None, help="指定端口列表（逗号分隔，默认常用高危端口）")
     infra.add_argument("--timeout", type=float, default=1.5, help="单端口超时秒（默认1.5）")
     infra.add_argument("--json", action="store_true", help="输出 JSON 结果")
+    infra.add_argument("--brute", action="store_true",
+                       help="（可选，仅授权目标）额外跑弱口令检测：Redis/HTTP 后台常见弱口令")
     return parser
 
 
@@ -749,10 +751,18 @@ async def cmd_infra(args: argparse.Namespace) -> None:
             raise RedTeamError("--ports 需逗号分隔的整数端口")
     print(f"[基础设施深度渗透] 目标 {args.host} ...")
     result = await asyncio.to_thread(infra_scan, args.host, ports, args.timeout)
+    if args.brute:
+        from .infra.bruteforce import run_brute
+        open_nums = [int(p["port"]) for p in result["open_ports"]]
+        result["brute_checks"] = await asyncio.to_thread(
+            run_brute, args.host, open_nums)
     if args.json:
         print(_json.dumps(result, ensure_ascii=False, indent=2))
     else:
         print(summarize(result))
+        if args.brute:
+            from .infra.bruteforce import summarize_brute
+            print(summarize_brute(result["brute_checks"]))
 
 
 async def cmd_schedule(args: argparse.Namespace) -> None:

