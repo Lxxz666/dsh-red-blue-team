@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 from .cve import run_cve_checks, summarize_cve
+from .cve_version import run_version_cves, summarize_version_cves
 from .fingerprint import http_fingerprint, probe_sensitive
 from .scanner import COMMON_PORTS, scan_ports
 from .vuln_check import run_vuln_checks
@@ -55,6 +56,9 @@ def infra_scan(host: str, ports: Optional[List[int]] = None,
     # 第四层：已知高危 CVE 深层次检测
     cve = run_cve_checks(host, open_nums)
 
+    # 第五层：版本指纹 → 已知 CVE 精确匹配
+    version_cve = run_version_cves(open_ports)
+
     return {
         "host": host,
         "open_ports": open_ports,
@@ -62,6 +66,7 @@ def infra_scan(host: str, ports: Optional[List[int]] = None,
         "sensitive_paths": sensitive,
         "vuln_checks": vuln,
         "cve_checks": cve,
+        "version_cves": version_cve,
     }
 
 
@@ -100,4 +105,13 @@ def summarize(result: Dict[str, object]) -> str:
             lines.append(f"  - [{c.get('risk')}] {c.get('cve')} ｜ {c.get('detail','')}")
     else:
         lines.append("[已知CVE/深层次] 未命中")
+    vc = result.get("version_cves") or []
+    if vc:
+        lines.append(f"[版本CVE精确匹配] 命中 {len(vc)} 项")
+        for c in vc:
+            lines.append(f"  - [{c.get('risk')}] :{c.get('port')} "
+                         f"{c.get('service')} {c.get('version')} → "
+                         f"{c.get('cve')} ｜ {c.get('detail','')}")
+    else:
+        lines.append("[版本CVE精确匹配] 未命中")
     return "\n".join(lines)
