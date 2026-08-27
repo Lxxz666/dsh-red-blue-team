@@ -245,6 +245,12 @@ class LlmAttackAgent:
                     messages.append(Message.user(
                         f"[已知CVE/深层次] {text[:500]}。\n"
                         f"命中高危漏洞就尝试利用/深入。"))
+                elif name == "version_cve":
+                    self._tool_calls_total += 1
+                    text = await self._execute_version_cve(args)
+                    messages.append(Message.user(
+                        f"[版本CVE精确匹配] {text[:500]}。\n"
+                        f"命中已知 CVE 就尝试利用/深入该服务。"))
                 elif name == "finalize_report":
                     try:
                         parsed = json.loads(args) if args else {}
@@ -409,6 +415,13 @@ class LlmAttackAgent:
                                                                        "description": "要检测的开放端口"},
                                                              "host": {"type": "string",
                                                                       "description": "目标主机（默认当前目标）"}}}}})
+            tools.insert(7, {"type": "function",
+                             "function": {"name": "version_cve",
+                                          "description": "从开放端口的服务 banner 提取版本号，精确匹配已知 CVE（Nginx/Apache/OpenSSH/Tomcat/Redis 等版本区间，如 CVE-2021-23017/CVE-2024-6387）。对扫出的服务版本做精确打击。",
+                                          "parameters": {"type": "object",
+                                                         "properties": {
+                                                             "ports": {"type": "array", "items": {"type": "integer"},
+                                                                       "description": "要匹配的开放端口列表"}}}}})
         return tools
 
     async def _execute_attack(self, args: str) -> Optional[VerdictResult]:
@@ -527,6 +540,24 @@ class LlmAttackAgent:
         host = str(parsed.get("host", "")).strip() or self._target_host()
         checks = run_cve_checks(host, [int(p) for p in ports])
         return summarize_cve(checks)
+
+    async def _execute_version_cve(self, args: str) -> str:
+        """version_cve：从端口服务 banner 提取版本精确匹配已知 CVE。"""
+        from ..infra import infra_scan
+        from ..infra.cve_version import run_version_cves, summarize_version_cves
+        try:
+            parsed = json.loads(args) if args else {}
+        except ValueError:
+            parsed = {}
+        ports = parsed.get("ports")
+        host = str(parsed.get("host", "")).strip() or self._target_host()
+        try:
+            result = infra_scan(host, ports=ports, timeout=1.5)
+            open_ports = result.get("open_ports", []) or []
+            checks = run_version_cves(open_ports)
+            return summarize_version_cves(checks)
+        except Exception as exc:
+            return f"version_cve 失败: {exc}"
 
     async def _execute_http_probe(self, args: str) -> str:
         """http_probe：GET 任意路径，返回状态码/响应头/响应截断（侦察用，不落判定）。"""
