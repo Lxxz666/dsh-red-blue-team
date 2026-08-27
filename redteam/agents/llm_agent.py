@@ -239,6 +239,12 @@ class LlmAttackAgent:
                     messages.append(Message.user(
                         f"[未授权/高危] {text[:500]}。\n"
                         f"命中漏洞就尝试利用/深入该服务。"))
+                elif name == "deep_vuln":
+                    self._tool_calls_total += 1
+                    text = await self._execute_deep_vuln(args)
+                    messages.append(Message.user(
+                        f"[已知CVE/深层次] {text[:500]}。\n"
+                        f"命中高危漏洞就尝试利用/深入。"))
                 elif name == "finalize_report":
                     try:
                         parsed = json.loads(args) if args else {}
@@ -394,6 +400,15 @@ class LlmAttackAgent:
                                                          "properties": {
                                                              "ports": {"type": "array", "items": {"type": "integer"},
                                                                        "description": "要检测的开放端口列表"}}}}})
+            tools.insert(6, {"type": "function",
+                             "function": {"name": "deep_vuln",
+                                          "description": "对开放端口做深层次已知高危 CVE 检测（Spring Actuator env/heapdump 泄露、Shiro rememberMe 反序列化、Struts2/WebLogic/Tomcat 利用面、Redis 未授权等）。",
+                                          "parameters": {"type": "object",
+                                                         "properties": {
+                                                             "ports": {"type": "array", "items": {"type": "integer"},
+                                                                       "description": "要检测的开放端口"},
+                                                             "host": {"type": "string",
+                                                                      "description": "目标主机（默认当前目标）"}}}}})
         return tools
 
     async def _execute_attack(self, args: str) -> Optional[VerdictResult]:
@@ -500,6 +515,18 @@ class LlmAttackAgent:
             return "未授权/高危检测未命中"
         return "\n".join(f"[{c.get('check')}] {c.get('detail','')}"
                          for c in vulns)
+
+    async def _execute_deep_vuln(self, args: str) -> str:
+        """deep_vuln：深层次已知高危 CVE 检测。"""
+        from ..infra.cve import run_cve_checks, summarize_cve
+        try:
+            parsed = json.loads(args) if args else {}
+        except ValueError:
+            parsed = {}
+        ports = parsed.get("ports") or []
+        host = str(parsed.get("host", "")).strip() or self._target_host()
+        checks = run_cve_checks(host, [int(p) for p in ports])
+        return summarize_cve(checks)
 
     async def _execute_http_probe(self, args: str) -> str:
         """http_probe：GET 任意路径，返回状态码/响应头/响应截断（侦察用，不落判定）。"""
