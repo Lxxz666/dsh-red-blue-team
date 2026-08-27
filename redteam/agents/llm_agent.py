@@ -220,6 +220,25 @@ class LlmAttackAgent:
                             f"失败就换路径/载荷，成功就深入同类攻击面；"
                             f"下一轮一次批量给出 3~5 个攻击/侦察调用；"
                             f"全部完成后调用 finalize_report 提交总结。"))
+                elif name == "host_scan":
+                    self._tool_calls_total += 1
+                    text = await self._execute_host_scan(args)
+                    messages.append(Message.user(
+                        f"[基础设施扫描] {text[:500]}。\n"
+                        f"根据开放端口/服务，用 service_fp / vuln_scan 深入；"
+                        f"发现可攻击服务就用 http_attack / attack_vector 利用。"))
+                elif name == "service_fp":
+                    self._tool_calls_total += 1
+                    text = await self._execute_service_fp(args)
+                    messages.append(Message.user(
+                        f"[服务指纹] {text[:500]}。\n"
+                        f"发现敏感路径/泄露面就继续利用。"))
+                elif name == "vuln_scan":
+                    self._tool_calls_total += 1
+                    text = await self._execute_vuln_scan(args)
+                    messages.append(Message.user(
+                        f"[未授权/高危] {text[:500]}。\n"
+                        f"命中漏洞就尝试利用/深入该服务。"))
                 elif name == "finalize_report":
                     try:
                         parsed = json.loads(args) if args else {}
@@ -351,6 +370,30 @@ class LlmAttackAgent:
                                                              "payload": {"type": "string",
                                                                          "description": "攻击载荷（请求体/查询参数内容）"}},
                                                          "required": ["method", "path", "payload"]}}})
+            tools.insert(3, {"type": "function",
+                             "function": {"name": "host_scan",
+                                          "description": "对目标主机做 TCP 端口扫描 + 服务 banner 识别，返回开放端口与对应服务（服务器层面渗透的信息收集）。",
+                                          "parameters": {"type": "object",
+                                                         "properties": {
+                                                             "host": {"type": "string",
+                                                                      "description": "目标主机/IP（默认当前目标）"},
+                                                             "ports": {"type": "array", "items": {"type": "integer"},
+                                                                       "description": "可选指定端口列表"}}}}})
+            tools.insert(4, {"type": "function",
+                             "function": {"name": "service_fp",
+                                          "description": "对指定端口做 HTTP 服务指纹 + 敏感路径探测（Actuator/备份/.git/管理后台/API文档等泄露面）。",
+                                          "parameters": {"type": "object",
+                                                         "properties": {
+                                                             "port": {"type": "integer",
+                                                                      "description": "目标端口（如 8080）"}},
+                                                         "required": ["port"]}}})
+            tools.insert(5, {"type": "function",
+                             "function": {"name": "vuln_scan",
+                                          "description": "对开放端口做常见未授权/高危检测（Redis/MongoDB/Memcached/Docker API/Elasticsearch/Nacos 未授权、Spring Actuator 泄露、Shiro 指纹）。",
+                                          "parameters": {"type": "object",
+                                                         "properties": {
+                                                             "ports": {"type": "array", "items": {"type": "integer"},
+                                                                       "description": "要检测的开放端口列表"}}}}})
         return tools
 
     async def _execute_attack(self, args: str) -> Optional[VerdictResult]:
@@ -394,6 +437,69 @@ class LlmAttackAgent:
         return verdict
 
     # ---- Explorer 工具：主动侦察与原始 HTTP 攻击（engine.llm_explorer_tools） ----
+
+    def _target_host(self) -> str:
+        """从目标 URL 解析主机名/IP（基础设施渗透的默认目标）。"""
+        from urllib.parse import urlparse
+        base = (getattr(self.adapter, "base_url", "") or
+                self.cfg.target.base_url or "")
+        try:
+            return urlparse(base).hostname or base
+        except Exception:
+            return base
+
+    async def _execute_host_scan(self, args: str) -> str:
+        """host_scan：TCP 端口扫描 + 服务识别（服务器层面信息收集）。"""
+        from ..infra import infra_scan, summarize
+        try:
+            parsed = json.loads(args) if args else {}
+        except ValueError:
+            parsed = {}
+        host = str(parsed.get("host", "")).strip() or self._target_host()
+        ports = parsed.get("ports")
+        try:
+            result = infra_scan(host, ports=ports, timeout=1.5)
+            return summarize(result)
+        except Exception as exc:
+            return f"host_scan 失败: {exc}"
+
+    async def _execute_service_fp(self, args: str) -> str:
+        """service_fp：HTTP 服务指纹 + 敏感路径探测。"""
+        from ..infra import http_fingerprint, probe_sensitive
+        try:
+            parsed = json.loads(args) if args else {}
+        except ValueError:
+            parsed = {}
+        port = int(parsed.get("port") or 80)
+        host = self._target_host()
+        scheme = "https" if port == 443 else "http"
+        fp = http_fingerprint(host, port, scheme)
+        lines = [
+            f"指纹 :{port} server={fp.get('server','')} "
+            f"title={fp.get('title','')} "
+            f"框架={'、'.join(fp.get('frameworks') or []) or '-'}",
+        ]
+        if not fp.get("error"):
+            for s in probe_sensitive(host, port, scheme)[:8]:
+                lines.append(f"敏感路径 {s.get('path')} HTTP {s.get('status')} "
+                             f"{s.get('note','')}")
+        return "\n".join(lines)
+
+    async def _execute_vuln_scan(self, args: str) -> str:
+        """vuln_scan：对开放端口做未授权/高危检测。"""
+        from ..infra import run_vuln_checks
+        try:
+            parsed = json.loads(args) if args else {}
+        except ValueError:
+            parsed = {}
+        ports = parsed.get("ports") or []
+        host = self._target_host()
+        checks = run_vuln_checks(host, [int(p) for p in ports])
+        vulns = [c for c in checks if c.get("status") == "vuln"]
+        if not vulns:
+            return "未授权/高危检测未命中"
+        return "\n".join(f"[{c.get('check')}] {c.get('detail','')}"
+                         for c in vulns)
 
     async def _execute_http_probe(self, args: str) -> str:
         """http_probe：GET 任意路径，返回状态码/响应头/响应截断（侦察用，不落判定）。"""

@@ -115,6 +115,12 @@ def build_parser() -> argparse.ArgumentParser:
     schedule.add_argument("--out", default="./scheduled", help="报告留存目录")
     schedule.add_argument("--webhook", default="", help="可选：每次扫描后 POST JSON 摘要")
     schedule.add_argument("--once", action="store_true", help="只跑一次（测试用）")
+
+    infra = sub.add_parser("infra", help="基础设施/服务器深度渗透（端口扫描→服务指纹→未授权/高危检测）")
+    infra.add_argument("host", help="目标主机/IP")
+    infra.add_argument("--ports", default=None, help="指定端口列表（逗号分隔，默认常用高危端口）")
+    infra.add_argument("--timeout", type=float, default=1.5, help="单端口超时秒（默认1.5）")
+    infra.add_argument("--json", action="store_true", help="输出 JSON 结果")
     return parser
 
 
@@ -146,6 +152,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             asyncio.run(cmd_batch(args))
         elif args.command == "schedule":
             asyncio.run(cmd_schedule(args))
+        elif args.command == "infra":
+            asyncio.run(cmd_infra(args))
         else:
             build_parser().print_help()
             return 1
@@ -727,6 +735,24 @@ def _write_batch_summary(results: List[Dict[str, Any]], out_dir: str) -> None:
     print(f"\n批扫完成：{len(results)} 个目标，汇总报告 {path}")
     if ranked:
         print(f"风险最高目标: {ranked[0]['name']}（评分 {ranked[0]['score']}）")
+
+
+async def cmd_infra(args: argparse.Namespace) -> None:
+    """基础设施/服务器深度渗透：端口扫描→服务指纹→未授权/高危检测。"""
+    from .infra import infra_scan, summarize
+    import json as _json
+    ports = None
+    if args.ports:
+        try:
+            ports = [int(p.strip()) for p in args.ports.split(",") if p.strip()]
+        except ValueError:
+            raise RedTeamError("--ports 需逗号分隔的整数端口")
+    print(f"[基础设施深度渗透] 目标 {args.host} ...")
+    result = await asyncio.to_thread(infra_scan, args.host, ports, args.timeout)
+    if args.json:
+        print(_json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        print(summarize(result))
 
 
 async def cmd_schedule(args: argparse.Namespace) -> None:
