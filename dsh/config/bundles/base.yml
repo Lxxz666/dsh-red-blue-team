@@ -108,6 +108,9 @@
 - id: tool-result-pruner
   plugin: dsh.compaction.pruner:ToolResultPrunerService
 
+- id: reflexion
+  plugin: dsh.agent.reflexion:ReflexionService
+
 - id: commands
   plugin: dsh.commands.commands:CommandRegistry
 

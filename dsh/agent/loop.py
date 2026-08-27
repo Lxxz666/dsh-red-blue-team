@@ -24,18 +24,17 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import time as _time
 from typing import Any, Dict, List, Optional
 
 from ..errors import LlmFailure
 from ..kernel import Service
 from ..llm.adapters import LlmCallConfig, LlmRequest
-from ..llm.messages import Message
 from ..llm.stream import AssistantAssembler, StreamChunk
 from ..session import Session, SessionHeader
 from ..tools.pipeline import AbortSignal
 from .agent import Agent
+from .reflexion import ReflexionService
 
 log = logging.getLogger("dsh.agent")
 
@@ -55,12 +54,6 @@ CONVERGE_HINT = (
     "请立即停止调用任何工具，基于你目前已知的信息如实、简洁地回答用户；"
     "如果确实无法确认，就直接承认没查到，不要继续搜索或重试。"
 )
-
-# Reflexion 失败反思（论文 2303.11366）：turn 以错误结束时，用 LLM 生成第一人称
-# 语言教训并写入长时记忆（ctx.memory）。门控：默认关，仅强模型有效
-# （弱模型自省无收益，见论文 Appendix A）。
-REFLECTION_ENABLED = os.environ.get("REFLECTION_ENABLED", "").strip() == "1"
-REFLECTION_MAX_MEM = 3  # 保留最近 N 条反思教训（论文 Ω 上限）
 
 
 class _TurnFailed(Exception):
@@ -306,9 +299,10 @@ class AgentLoopService(Service):
             reason = self._abort_reason(agent)
         # turn 收尾即清除取消语义：cause 不得跨 turn 泄漏到后续轮次
         agent._cancel_cause = None
-        # Reflexion（2303.11366）：turn 失败 → 生成语言教训写入长时记忆
-        if reason.get("kind") == "error":
-            await self._reflect_failure(agent, turn, reason)
+        # Reflexion（2303.11366）：turn 失败 → 委托 reflexion 服务生成教训
+        if self.ctx.has("reflexion") and ReflexionService.should_reflect(reason):
+            await self.ctx.reflexion.reflect(
+                reason.get("error") or {}, session_id=agent.session.id)
         session.append("turn/end", {"turn": turn, "reason": reason})
         # 注意：持久化 flush 不放这里 —— turn 关键路径 await 事件广播会与
         # 异步 session/event 监听器死锁；改由 driver 循环在 turn 结束后落盘。
@@ -316,51 +310,6 @@ class AgentLoopService(Service):
     def _abort_reason(self, agent: Agent) -> Dict[str, Any]:
         cause = agent._cancel_cause or {"kind": "user"}
         return {"kind": "aborted", "reason": dict(cause)}
-
-    # ---- Reflexion 失败反思（论文 2303.11366） ----
-
-    async def _reflect_failure(self, agent: Agent, turn: int,
-                               reason: Dict[str, Any]) -> None:
-        """失败后生成第一人称语言教训并写入长时记忆（ctx.memory）。
-
-        异常全部隔离——反思失败绝不阻塞 turn 收尾（turn/end 必须落盘）。
-        """
-        try:
-            if not REFLECTION_ENABLED or not self.ctx.has("memory"):
-                return
-            err = reason.get("error") or {}
-            prompt = (
-                "你是一个经验丰富的智能体。刚才处理用户任务时失败，请反思。\n"
-                f"失败原因：{err.get('message', '未知')} (code={err.get('code', '')})\n"
-                "请用第一人称写一条简洁的自我反思（1-2 句），包含：1) 为什么会失败；"
-                "2) 下次遇到同类情况应该怎么做。直接输出反思内容，不要客套。"
-            )
-            config = self._default_config(agent)
-            request = LlmRequest(config=config,
-                                 messages=[Message.user(prompt)])
-            parts: List[str] = []
-            async for chunk in self.ctx.llm.stream(request):
-                if chunk.type == "text-delta" and chunk.text:
-                    parts.append(chunk.text)
-            lesson = "".join(parts).strip()
-            if not lesson:
-                return
-            self.ctx.memory.add(lesson, tags=["reflexion", f"turn:{turn}"])
-            self._prune_reflexions()
-        except Exception:
-            log.exception("reflexion failed")  # 不阻塞 turn 结束
-
-    def _prune_reflexions(self) -> None:
-        """保留最近 REFLECTION_MAX_MEM 条 reflexion 记忆（论文 Ω 上限）。"""
-        try:
-            if not self.ctx.has("memory"):
-                return
-            refl = [e for e in self.ctx.memory.list()
-                    if "reflexion" in e.get("tags", [])]
-            for entry in refl[REFLECTION_MAX_MEM:]:
-                self.ctx.memory.remove(entry["id"])
-        except Exception:
-            log.exception("prune reflexions failed")
 
     # ---- step ----
 
